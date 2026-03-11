@@ -6,7 +6,7 @@ from fpdf import FPDF
 
 # --- CONFIGURATION API ---
 # Remplacez bien par votre lien SheetDB
-API_URL = "https://sheetdb.io/api/v1/VOTRE_CODE_ICI" 
+API_URL = "https://sheetdb.io/api/v1/in9prjm4jds07" 
 
 st.set_page_config(page_title="Top-Paradiso - Gestion Professionnelle", layout="wide")
 
@@ -166,3 +166,4 @@ else:
             
             pdf_data = generer_pdf(s_m, df_d, mois, stats)
             st.download_button("📥 Télécharger Rapport PDF", pdf_data, f"Bilan_{mois}.pdf", "application/pdf")
+
