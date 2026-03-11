@@ -6,7 +6,7 @@ from fpdf import FPDF
 
 # --- CONFIGURATION ---
 # REMPLACEZ PAR VOTRE LIEN SHEETDB
-API_URL = "https://sheetdb.io/api/v1/VOTRE_CODE_ICI" 
+API_URL = "https://sheetdb.io/api/v1/in9prjm4jds07" 
 LISTE_APPARTEMENTS = ["Appart A1", "Appart A2", "Appart A3", "Appart A4"]
 PRIX_NUITEE = 15000
 
@@ -223,3 +223,4 @@ else:
             pdf_out = generer_pdf(s_m, d_m, sel_mois, ca_total, comm_total, dep_total, net)
             st.download_button("📥 TÉLÉCHARGER LE BILAN PDF", pdf_out, f"Bilan_{sel_mois}.pdf", "application/pdf")
         else: st.info("Pas encore de données pour générer un bilan.")
+
