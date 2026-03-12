@@ -7,7 +7,7 @@ import uuid
 
 # --- CONFIGURATION ---
 # REMPLACEZ PAR VOTRE LIEN RÉEL
-API_URL = "https://sheetdb.io/api/v1/d2j1p5qefxvli" 
+API_URL = "https://sheetdb.io/api/v1/pext6md8mdy32" 
 PRIX_NUITEE = 15000
 APPARTEMENTS = ["Appart A1", "Appart A2", "Appart A3", "Appart A4"]
 
@@ -23,6 +23,7 @@ def charger(onglet):
     except: return pd.DataFrame()
 
 def sauver(ligne, onglet):
+    # Envoi des données vers SheetDB
     return requests.post(f"{API_URL}?sheet={onglet}", json={"data": [ligne]})
 
 def maj(onglet, col_recherche, valeur_recherche, donnee):
@@ -31,26 +32,38 @@ def maj(onglet, col_recherche, valeur_recherche, donnee):
 def sup(onglet, col_recherche, valeur_recherche):
     return requests.delete(f"{API_URL}/{col_recherche}/{valeur_recherche}?sheet={onglet}")
 
-# --- FONCTION PDF ---
-def imprimer_bilan(mois, df_s, df_d, ca, comm, dep, net):
+# --- FONCTION PDF CORRIGÉE ---
+def imprimer_bilan(mois_nom, df_s, df_d, ca, comm, dep, net):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", "B", 16)
-    pdf.cell(200, 10, f"BILAN MENSUEL - {mois}", ln=True, align="C")
-    pdf.set_font("Arial", "", 12)
+    pdf.cell(200, 10, f"BILAN MENSUEL - {mois_nom}", ln=True, align="C")
     pdf.ln(10)
-    pdf.cell(0, 10, f"Chiffre d'Affaires Global : {ca:,.0f} F", ln=True)
-    pdf.cell(0, 10, f"Total Frais Demarcheurs : {comm:,.0f} F", ln=True)
-    pdf.cell(0, 10, f"Total Depenses : {dep:,.0f} F", ln=True)
+    
     pdf.set_font("Arial", "B", 12)
+    pdf.cell(0, 10, f"CHIFFRE D'AFFAIRES BRUT : {ca:,.0f} F", ln=True)
+    pdf.cell(0, 10, f"TOTAL COMMISSIONS DEMARCHEURS : {comm:,.0f} F", ln=True)
+    pdf.cell(0, 10, f"TOTAL DEPENSES (CHARGES) : {dep:,.0f} F", ln=True)
+    pdf.set_font("Arial", "B", 14)
+    pdf.set_text_color(0, 100, 0)
     pdf.cell(0, 10, f"MONTANT NET RESTANT : {net:,.0f} F", ln=True)
+    pdf.set_text_color(0, 0, 0)
+    
     pdf.ln(10)
-    pdf.set_font("Arial", "B", 10)
-    pdf.cell(0, 10, "Detail des Depenses :", ln=True)
-    pdf.set_font("Arial", "", 9)
+    pdf.set_font("Arial", "B", 11)
+    pdf.cell(0, 10, "DETAIL DES DEPENSES DU MOIS :", ln=True)
+    pdf.set_font("Arial", "", 10)
+    
     if not df_d.empty:
         for _, r in df_d.iterrows():
-            pdf.cell(0, 7, f"- {r.get('Date','')} : {r.get('Motif','')} ({r.get('Appartement','')}) = {r.get('Montant','')} F", ln=True)
+            motif = str(r.get('Motif', 'Sans motif'))
+            montant = str(r.get('Montant', '0'))
+            app = str(r.get('Appartement', 'Général'))
+            date_d = str(r.get('Date', ''))
+            pdf.cell(0, 7, f"- {date_d} | {motif} ({app}) : {montant} F", ln=True)
+    else:
+        pdf.cell(0, 10, "Aucune depense enregistree pour ce mois.", ln=True)
+        
     return pdf.output(dest="S").encode("latin-1", "replace")
 
 # --- AUTHENTIFICATION ---
@@ -66,7 +79,7 @@ if not st.session_state.auth:
         else: st.error("Identifiants incorrects")
 else:
     st.sidebar.title(f"👤 {st.session_state.role.upper()}")
-    menu = st.sidebar.radio("Navigation", ["Dashboard", "Enregistrement Client", "Réservations", "Dépenses & Maintenance", "MODIFICATIONS (Admin)", "RAPPORTS PDF (Admin)"])
+    menu = st.sidebar.radio("Navigation", ["Dashboard", "Enregistrement Client", "Dépenses & Maintenance", "MODIFICATIONS (Admin)", "RAPPORTS PDF (Admin)"])
     if st.sidebar.button("Déconnexion"): st.session_state.auth = False; st.rerun()
 
     # 1. DASHBOARD
@@ -76,13 +89,13 @@ else:
         cols = st.columns(4)
         for i, app in enumerate(APPARTEMENTS):
             with cols[i]:
-                maintenance_active = False
+                m_active = False
                 if not df_m.empty and "Appartement" in df_m.columns:
                     m_info = df_m[df_m["Appartement"] == app]
                     if not m_info.empty and m_info.iloc[0].get("Statut") == "Inaccessible":
-                        st.error(f"**{app}**\n\n❌ INACCESSIBLE\n\nMotif: {m_info.iloc[0].get('Raison', 'Maintenance')}")
-                        maintenance_active = True
-                if not maintenance_active:
+                        st.error(f"**{app}**\n\n❌ INACCESSIBLE\n\n{m_info.iloc[0].get('Raison', '')}")
+                        m_active = True
+                if not m_active:
                     occupe = False
                     if not df_s.empty and "Appartement" in df_s.columns and "Statut" in df_s.columns:
                         if app in df_s[df_s["Statut"] == "En cours"]["Appartement"].tolist():
@@ -90,29 +103,27 @@ else:
                             occupe = True
                     if not occupe: st.success(f"**{app}**\n\n🟢 LIBRE")
 
-    # 2. ENREGISTREMENT
+    # 2. ENREGISTREMENT CLIENT
     elif menu == "Enregistrement Client":
-        st.header("📝 Nouvelle Fiche Client")
+        st.header("📝 Fiche Client")
         with st.form("Inscription"):
             c1, c2 = st.columns(2)
             with c1:
                 nom = st.text_input("Nom et Prénom")
                 dnais = st.date_input("Date Naissance", min_value=date(1945,1,1), value=date(1990,1,1))
                 prov = st.text_input("Provenance (Pays, Ville)")
-                tel = st.text_input("Téléphone (avec indicatif)")
-                piece = st.selectbox("Pièce", ["Passeport", "Permis", "Carte Séjour", "CNI"])
+                tel = st.text_input("Téléphone client")
+                piece = st.selectbox("Pièce", ["CNI", "Passeport", "Permis", "Carte Séjour"])
                 pnum = st.text_input("N° de Pièce")
             with c2:
                 app = st.selectbox("Appartement", APPARTEMENTS)
                 dent = st.date_input("Date Entrée")
-                dsor = st.date_input("Date Sortie (si prévue)")
+                dsor = st.date_input("Date Sortie prévue")
                 raison = st.text_input("Raison du séjour")
                 enom = st.text_input("Employé de garde")
-                etel = st.text_input("Tel Employé")
-            st.subheader("🤝 Démarcheur")
-            dem_nom = st.text_input("Nom Démarcheur")
-            dem_tel = st.text_input("Tel Démarcheur")
-            if st.form_submit_button("VALIDER"):
+            
+            dem_nom = st.text_input("Nom Démarcheur (Optionnel)")
+            if st.form_submit_button("VALIDER L'ENREGISTREMENT"):
                 nuits = max((dsor - dent).days, 1)
                 total = nuits * PRIX_NUITEE
                 comm = total * 0.10 if dem_nom else 0
@@ -120,91 +131,89 @@ else:
                     "id": str(uuid.uuid4())[:8], "Client_Nom": nom, "Date_Naissance": str(dnais), "Provenance": prov,
                     "Piece_Type": piece, "Piece_Num": pnum, "Tel_Client": tel, "Date_Entree": str(dent),
                     "Date_Sortie": str(dsor), "Raison": raison, "Appartement": app, "Employe_Nom": enom,
-                    "Employe_Tel": etel, "Demarcheur_Nom": dem_nom if dem_nom else "Aucun",
-                    "Demarcheur_Tel": dem_tel, "Montant_Total": total, "Commission": comm,
+                    "Demarcheur_Nom": dem_nom if dem_nom else "Aucun", "Montant_Total": total, "Commission": comm,
                     "Mois": dent.strftime("%m-%Y"), "Statut": "En cours"
                 }, "sejours")
                 st.success(f"✅ Enregistré ! Total : {total:,} F")
 
-    # 3. RÉSERVATIONS
-    elif menu == "Réservations":
-        st.header("📅 Réservations")
-        with st.form("res"):
-            r_nom = st.text_input("Nom/Réf Client")
-            r_app = st.selectbox("Appartement", APPARTEMENTS)
-            r_date = st.date_input("Date prévue")
-            if st.form_submit_button("Réserver"):
-                sauver({"id": str(uuid.uuid4())[:8], "Client_Ref": r_nom, "Appartement": r_app, "Date_Reservation": str(date.today()), "Date_Prevue": str(r_date)}, "reservations")
-                st.success("Réservé.")
-
-    # 4. DÉPENSES & MAINTENANCE
+    # 3. DÉPENSES & MAINTENANCE
     elif menu == "Dépenses & Maintenance":
-        t1, t2 = st.tabs(["💸 Dépenses", "🛠️ Maintenance"])
-        with t1:
-            with st.form("dep"):
-                m_dep = st.text_input("Motif")
-                v_dep = st.number_input("Montant", min_value=0)
-                a_dep = st.selectbox("Cible", ["Général"] + APPARTEMENTS)
-                e_dep = st.text_input("Employé")
-                if st.form_submit_button("Sauver"):
-                    sauver({"id": str(uuid.uuid4())[:8], "Date": str(date.today()), "Motif": m_dep, "Montant": v_dep, "Appartement": a_dep, "Employe": e_dep, "Mois": date.today().strftime("%m-%Y")}, "depenses")
-                    st.success("Enregistré.")
-        with t2:
-            st.subheader("État Inaccessible")
+        tab1, tab2 = st.tabs(["💸 Saisir Dépense", "🛠️ État Appartement"])
+        with tab1:
+            st.subheader("Nouvelle Dépense")
+            with st.form("form_dep"):
+                motif = st.text_input("Motif de la dépense (ex: Electricité, détergent...)")
+                montant = st.number_input("Montant de la dépense (F)", min_value=0)
+                cible = st.selectbox("Appartement concerné", ["Général"] + APPARTEMENTS)
+                responsable = st.text_input("Employé responsable")
+                if st.form_submit_button("ENREGISTRER LA DÉPENSE"):
+                    # Formatage du mois identique au séjour pour le filtrage
+                    mois_actuel = date.today().strftime("%m-%Y")
+                    sauver({
+                        "id": str(uuid.uuid4())[:8], 
+                        "Date": str(date.today()), 
+                        "Motif": motif, 
+                        "Montant": montant, 
+                        "Appartement": cible, 
+                        "Employe": responsable, 
+                        "Mois": mois_actuel
+                    }, "depenses")
+                    st.success(f"✅ Dépense de {montant} F enregistrée dans Excel !")
+
+        with tab2:
+            st.subheader("Maintenance")
             app_m = st.selectbox("Appartement", APPARTEMENTS)
             stat_m = st.selectbox("Statut", ["Disponible", "Inaccessible"])
             rais_m = st.text_input("Raison")
-            if st.button("Valider État"):
+            if st.button("Mettre à jour l'état"):
                 df_c = charger("maintenance")
                 if not df_c.empty and "Appartement" in df_c.columns and app_m in df_c["Appartement"].tolist():
                     maj("maintenance", "Appartement", app_m, {"Statut": stat_m, "Raison": rais_m})
                 else: sauver({"Appartement": app_m, "Statut": stat_m, "Raison": rais_m}, "maintenance")
-                st.success("Mis à jour.")
+                st.success("État mis à jour.")
 
-    # 5. MODIFICATIONS (ADMIN)
+    # 4. MODIFICATIONS (ADMIN)
     elif menu == "MODIFICATIONS (Admin)":
-        if st.session_state.role != "admin": st.error("Réservé")
+        if st.session_state.role != "admin": st.error("Accès réservé")
         else:
-            st.header("⚙️ Modifications & Suppressions")
-            target = st.selectbox("Cible", ["sejours", "reservations", "depenses"])
+            st.header("⚙️ Administration des données")
+            target = st.selectbox("Choisir l'onglet", ["sejours", "depenses"])
             df_edit = charger(target)
             if not df_edit.empty:
-                col_ref = "Client_Nom" if target == "sejours" else "id"
-                sel = st.selectbox("Élément", df_edit[col_ref].tolist())
-                with st.form("edit"):
-                    st.write(f"Edition de {sel}")
-                    new_val = st.number_input("Corriger Montant", value=0)
-                    if st.form_submit_button("Corriger"):
-                        maj(target, col_ref, sel, {"Montant_Total": new_val} if target=="sejours" else {"Montant": new_val})
-                        st.success("Corrigé.")
-                if st.button("🗑️ SUPPRIMER"):
-                    sup(target, col_ref, sel)
+                col_id = "Client_Nom" if target == "sejours" else "Motif"
+                sel = st.selectbox("Élément à modifier", df_edit[col_id].tolist())
+                if st.button("🗑️ SUPPRIMER CET ÉLÉMENT"):
+                    sup(target, col_id, sel)
                     st.error("Supprimé.")
                     st.rerun()
 
-    # 6. RAPPORTS PDF (ADMIN)
+    # 5. RAPPORTS PDF (ADMIN)
     elif menu == "RAPPORTS PDF (Admin)":
-        st.header("📊 Rapports PDF de fin de mois")
+        st.header("📊 Rapports PDF Mensuels")
         df_s, df_d = charger("sejours"), charger("depenses")
+        
         if not df_s.empty:
-            mois_sel = st.selectbox("Mois", df_s["Mois"].unique() if "Mois" in df_s.columns else [])
-            if mois_sel:
-                s_m = df_s[df_s["Mois"] == mois_sel]
-                d_m = df_d[df_d["Mois"] == mois_sel] if not df_d.empty and "Mois" in df_d.columns else pd.DataFrame()
-                
-                # Calculs numériques
-                for c in ["Montant_Total", "Commission"]: s_m[c] = pd.to_numeric(s_m[c], errors='coerce').fillna(0)
-                if not d_m.empty: d_m["Montant"] = pd.to_numeric(d_m["Montant"], errors='coerce').fillna(0)
-                
-                ca, com = s_m["Montant_Total"].sum(), s_m["Commission"].sum()
-                dep = d_m["Montant"].sum() if not d_m.empty else 0
-                net = ca - com - dep
-                
-                st.metric("Bénéfice Net", f"{net:,.0f} F")
-                st.write("**Récapitulatif par Appartement :**")
-                stats = s_m.groupby("Appartement").agg({"Montant_Total": "sum", "Commission": "sum"})
-                st.table(stats)
-                
-                # Bouton PDF
-                pdf_bytes = imprimer_bilan(mois_sel, s_m, d_m, ca, com, dep, net)
-                st.download_button(f"📥 Télécharger Rapport PDF {mois_sel}", pdf_bytes, f"Bilan_{mois_sel}.pdf", "application/pdf")
+            mois_disponibles = df_s["Mois"].unique()
+            mois_sel = st.selectbox("Sélectionner le mois", mois_disponibles)
+            
+            # Filtrage des séjours et dépenses par mois
+            s_m = df_s[df_s["Mois"] == mois_sel]
+            d_m = df_d[df_d["Mois"] == mois_sel] if not df_d.empty else pd.DataFrame()
+            
+            # Calculs financiers
+            for c in ["Montant_Total", "Commission"]: s_m[c] = pd.to_numeric(s_m[c], errors='coerce').fillna(0)
+            if not d_m.empty: d_m["Montant"] = pd.to_numeric(d_m["Montant"], errors='coerce').fillna(0)
+            
+            ca, com = s_m["Montant_Total"].sum(), s_m["Commission"].sum()
+            dep = d_m["Montant"].sum() if not d_m.empty else 0
+            net = ca - com - dep
+            
+            st.subheader(f"Bilan {mois_sel}")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Revenus Bruts", f"{ca:,.0f} F")
+            c2.metric("Dépenses", f"{dep:,.0f} F")
+            c3.metric("Net Restant", f"{net:,.0f} F")
+
+            # Bouton PDF
+            pdf_bytes = imprimer_bilan(mois_sel, s_m, d_m, ca, com, dep, net)
+            st.download_button(f"📥 Télécharger le Rapport PDF ({mois_sel})", pdf_bytes, f"Bilan_{mois_sel}.pdf", "application/pdf")
