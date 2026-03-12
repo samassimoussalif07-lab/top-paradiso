@@ -6,7 +6,7 @@ from fpdf import FPDF
 import uuid
 
 # --- CONFIGURATION ---
-API_URL = "https://sheetdb.io/api/v1/in9prjm4jds07" 
+API_URL = "https://sheetdb.io/api/v1/zg0ey34tax4dn" 
 PRIX_NUITEE = 15000
 APPARTEMENTS = ["Appart A1", "Appart A2", "Appart A3", "Appart A4"]
 
@@ -213,3 +213,4 @@ else:
             # Bouton PDF
             pdf_data = imprimer_bilan(mois_sel, s_m, d_m, ca_total, com_total, dep_total, net)
             st.download_button(f"📥 Télécharger Bilan {mois_sel} (PDF)", pdf_data, f"Bilan_{mois_sel}.pdf", "application/pdf")
+
