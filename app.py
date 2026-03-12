@@ -228,4 +228,5 @@ else:
                     st.table(d_m[["Date", "Motif", "Montant", "Appartement"]])
                 
                 pdf_bytes = imprimer_bilan(sel_m, s_m, d_m, ca, com, dep, net)
-                st.download_button(f"📥 Télécharger PDF {sel_m}", pdf_bytes, f"Bilan_{sel_m}.pdf", "application/pdf"
+                st.download_button(f"📥 Télécharger PDF {sel_m}", pdf_bytes, f"Bilan_{sel_m}.pdf", "application/pdf")
+
