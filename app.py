@@ -7,7 +7,7 @@ import uuid
 
 # --- CONFIGURATION ---
 # REMPLACEZ PAR VOTRE LIEN RÉEL SHEETDB
-API_URL = "https://sheetdb.io/api/v1/tum67pp16hkw1" 
+API_URL = "https://sheetdb.io/api/v1/2a307403dpyom" 
 PRIX_NUITEE = 15000
 APPARTEMENTS = ["Appart A1", "Appart A2", "Appart A3", "Appart A4"]
 
@@ -229,5 +229,6 @@ else:
                 
                 pdf_bytes = imprimer_bilan(sel_m, s_m, d_m, ca, com, dep, net)
                 st.download_button(f"📥 Télécharger PDF {sel_m}", pdf_bytes, f"Bilan_{sel_m}.pdf", "application/pdf")
+
 
 
