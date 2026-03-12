@@ -12,10 +12,17 @@ PRIX_NUITEE = 15000
 APPARTEMENTS = ["Appart A1", "Appart A2", "Appart A3", "Appart A4"]
 TZ_BF = pytz.timezone('Africa/Ouagadougou')
 
+# Dictionnaire pour convertir les numéros de mois en noms français
+MOIS_FR = {
+    "01": "JANVIER", "02": "FEVRIER", "03": "MARS", "04": "AVRIL",
+    "05": "MAI", "06": "JUIN", "07": "JUILLET", "08": "AOUT",
+    "09": "SEPTEMBRE", "10": "OCTOBRE", "11": "NOVEMBRE", "12": "DECEMBRE"
+}
+
 st.set_page_config(page_title="Résidence VIP - Dashboard", layout="wide")
 
-# --- FONCTIONS API (OPTIMISÉES) ---
-@st.cache_data(ttl=5) # Rafraîchissement automatique toutes les 5 secondes
+# --- FONCTIONS API ---
+@st.cache_data(ttl=5)
 def charger(onglet):
     try:
         r = requests.get(f"{API_URL}?sheet={onglet}", timeout=10)
@@ -50,13 +57,20 @@ def obtenir_etats():
             except: continue
     return bloques, occupes
 
-# --- GÉNÉRATEUR PDF (STYLE EXACT) ---
-def imprimer_bilan(mois_nom, ca, comm, dep, net, df_dep):
+# --- GÉNÉRATEUR PDF (AVEC EN-TÊTE DEMANDÉ) ---
+def imprimer_bilan(mois_code, ca, comm, dep, net, df_dep):
+    # Extraction du mois et de l'année à partir du code (ex: 03-2026)
+    m_num, annee = mois_code.split("-")
+    nom_mois = MOIS_FR.get(m_num, "INCONNU")
+    titre_bilan = f"BILAN DU MOIS DE {nom_mois} {annee}"
+
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, f"BILAN MENSUEL - {mois_nom}", ln=True, align="R")
+    # Affichage de l'en-tête exactement comme demandé
+    pdf.cell(0, 10, titre_bilan, ln=True, align="R")
     pdf.ln(20)
+    
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 10, f"CHIFFRE D'AFFAIRES BRUT : {int(ca):,} F".upper(), ln=True)
     pdf.cell(0, 10, f"TOTAL COMMISSIONS : {int(comm):,} F".upper(), ln=True)
@@ -95,7 +109,7 @@ else:
                 elif app in occupes: st.warning(f"**{app}**\n\n🔴 OCCUPÉ\n\nLibre : {occupes[app]}")
                 else: st.success(f"**{app}**\n\n🟢 LIBRE")
 
-    # 2. ENREGISTREMENT
+    # 2. ENREGISTREMENT CLIENT
     elif menu == "Enregistrement Client":
         st.header("📝 Nouveau Client")
         libres = [a for a in APPARTEMENTS if a not in bloques and a not in occupes]
@@ -104,24 +118,17 @@ else:
             with st.form("inscription"):
                 c1, c2, c3 = st.columns(3)
                 with c1:
-                    nom = st.text_input("Nom Client")
-                    dnais = st.date_input("Naissance", value=date(1990,1,1))
-                    prov = st.text_input("Provenance")
-                    tel = st.text_input("Tel Client")
+                    nom, dnais = st.text_input("Nom Client"), st.date_input("Naissance", value=date(1990,1,1))
+                    prov, tel = st.text_input("Provenance"), st.text_input("Tel Client")
                 with c2:
-                    piece = st.selectbox("Pièce", ["CNI", "Passeport", "Permis"])
-                    pnum = st.text_input("N° Pièce")
-                    app = st.selectbox("Appartement", libres)
-                    rais = st.text_input("Raison")
+                    piece, pnum = st.selectbox("Pièce", ["CNI", "Passeport", "Permis"]), st.text_input("N° Pièce")
+                    app, rais = st.selectbox("Appartement", libres), st.text_input("Raison")
                 with c3:
-                    dent = st.date_input("Entrée", value=date.today())
-                    nuits = st.number_input("Nuits", min_value=1)
-                    enom = st.text_input("Nom Employé")
-                    etel = st.text_input("Tel Employé")
+                    dent, nuits = st.date_input("Entrée", value=date.today()), st.number_input("Nuits", min_value=1)
+                    enom, etel = st.text_input("Nom Employé"), st.text_input("Tel Employé")
                 dnom, dtel = st.text_input("Démarcheur"), st.text_input("Tel Démarcheur")
                 if st.form_submit_button("VALIDER"):
-                    dsor = dent + timedelta(days=nuits)
-                    total = nuits * PRIX_NUITEE
+                    dsor, total = dent + timedelta(days=nuits), nuits * PRIX_NUITEE
                     data = {
                         "id": str(uuid.uuid4())[:8], "Client_Nom": nom, "Date_Naissance": str(dnais), "Provenance": prov,
                         "Piece_Type": piece, "Piece_Num": pnum, "Tel_Client": tel, "Date_Entree": str(dent), "Date_Sortie": str(dsor),
@@ -160,48 +167,38 @@ else:
                 if st.button("SUPPRIMER"):
                     if supprimer_ligne(onglet, "id", sel): st.success("Supprimé"); st.cache_data.clear(); st.rerun()
 
-    # 5. RAPPORT PDF (VERSION TEMPS RÉEL)
+    # 5. RAPPORT PDF
     elif menu == "RAPPORT PDF":
         if st.session_state.role != "admin": st.error("Accès Admin")
         else:
-            st.header("📈 Suivi Financier en Temps Réel")
+            st.header("📈 Suivi Financier et Bilans")
             df_s, df_d = charger("sejours"), charger("depenses")
-            
             if not df_s.empty:
                 mois_list = sorted(df_s["Mois"].unique(), reverse=True)
-                sel_m = st.selectbox("Sélectionner le mois à surveiller", mois_list)
+                sel_m = st.selectbox("Sélectionner le mois", mois_list)
                 
-                # Filtrage
                 s_m = df_s[df_s["Mois"] == sel_m]
                 d_m = df_d[df_d["Mois"] == sel_m] if not df_d.empty else pd.DataFrame()
                 
-                # Calculs automatiques
                 ca = pd.to_numeric(s_m["Montant_Total"]).sum()
                 com = pd.to_numeric(s_m["Commission"]).sum()
                 dep = pd.to_numeric(d_m["Montant"]).sum() if not d_m.empty else 0
                 net = ca - com - dep
                 
-                # AFFICHAGE DU BILAN PROGRESSIF
-                st.subheader(f"Bilan de {sel_m}")
+                # AFFICHAGE DU SUIVI FINANCIER (Inchangé)
+                st.subheader(f"Suivi financier : {sel_m}")
                 m1, m2, m3, m4 = st.columns(4)
-                m1.metric("CHIFFRE D'AFFAIRE", f"{ca:,.0f} F", delta_color="normal")
-                m2.metric("COMMISSIONS", f"{com:,.0f} F", delta_color="inverse")
-                m3.metric("DÉPENSES", f"{dep:,.0f} F", delta_color="inverse")
-                m4.metric("MONTANT NET", f"{net:,.0f} F", delta=f"{net:,.0f} F")
+                m1.metric("CHIFFRE D'AFFAIRE", f"{ca:,.0f} F")
+                m2.metric("COMMISSIONS", f"{com:,.0f} F")
+                m3.metric("DÉPENSES", f"{dep:,.0f} F")
+                m4.metric("MONTANT NET", f"{net:,.0f} F")
 
                 st.divider()
-                
-                # Affichage des dépenses détaillées
-                st.write("**DÉTAIL DES DÉPENSES DU MOIS :**")
-                if not d_m.empty:
-                    st.table(d_m[["Date", "Motif", "Appartement", "Montant"]])
-                else:
-                    st.info("Aucune dépense pour ce mois.")
+                st.write("**DÉTAIL DES DÉPENSES :**")
+                if not d_m.empty: st.table(d_m[["Date", "Motif", "Appartement", "Montant"]])
+                else: st.info("Aucune dépense.")
 
                 st.divider()
-                
-                # Génération du PDF final
+                # Bouton PDF avec le nouveau titre
                 pdf_bytes = imprimer_bilan(sel_m, ca, com, dep, net, d_m)
-                st.download_button(f"📥 Télécharger le rapport PDF Officiel - {sel_m}", pdf_bytes, f"Bilan_{sel_m}.pdf")
-            else:
-                st.warning("Aucune donnée disponible pour générer un bilan.")
+                st.download_button(f"📥 Télécharger BILAN OFFICIEL - {sel_m}", pdf_bytes, f"Bilan_{sel_m}.pdf")
