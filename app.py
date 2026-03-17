@@ -184,15 +184,16 @@ else:
         if st.session_state.role != "admin": st.error("Accès Admin")
         else:
             st.header("📈 Suivi Financier et Bilans")
-            df_s, df_d = charger("sejours"), charger("depenses")
+            df_s, df_d = charger("sejours")
+            df_d = charger("depenses")
             if not df_s.empty:
-                mois_list = sorted(df_s["Mois"].unique(), reverse=True)
+                mois_list = sorted(df_s["Mois"].dropna().unique(), reverse=True)
                 sel_m = st.selectbox("Sélectionner le mois", mois_list)
-                s_m = df_s[df_s["Mois"] == sel_m]
-                d_m = df_d[df_d["Mois"] == sel_m] if not df_d.empty else pd.DataFrame()
-                ca = pd.to_numeric(s_m["Montant_Total"]).sum()
-                com = pd.to_numeric(s_m["Commission"]).sum()
-                dep = pd.to_numeric(d_m["Montant"]).sum() if not d_m.empty else 0
+                s_m = df_s[df_s["Mois"] == sel_m].copy()
+                d_m = df_d[df_d["Mois"] == sel_m].copy() if not df_d.empty else pd.DataFrame()
+                ca = pd.to_numeric(s_m["Montant_Total"], errors='coerce').fillna(0).sum()
+                com = pd.to_numeric(s_m["Commission"], errors='coerce').fillna(0).sum()
+                dep = pd.to_numeric(d_m["Montant"], errors='coerce').fillna(0).sum() if not d_m.empty else 0
                 net = ca - com - dep
                 
                 st.subheader(f"Suivi financier : {sel_m}")
