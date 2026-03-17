@@ -132,9 +132,15 @@ def imprimer_bilan(mois_code: str, ca: float, comm: float, dep: float, net: floa
             
     return pdf.output(dest="S").encode('latin-1', 'replace')
 
-# --- AUTHENTIFICATION ---
+# --- AUTHENTIFICATION & NAVIGATION ---
 if 'auth' not in st.session_state: 
     st.session_state.auth, st.session_state.role = False, None
+
+# Gestion de la redirection depuis le Dashboard
+if 'page_active' not in st.session_state:
+    st.session_state.page_active = "🏠 Dashboard"
+if 'appart_cible' not in st.session_state:
+    st.session_state.appart_cible = None
 
 if not st.session_state.auth:
     st.title("🔐 Résidence VIP - Interface Sécurisée")
@@ -163,20 +169,25 @@ else:
     st.sidebar.markdown(f"**Rôle Actif:** `{st.session_state.role.upper()}`")
     st.sidebar.info(f"📍 Ouagadougou : {datetime.now(CONFIG['TZ_BF']).strftime('%H:%M')}")
     
+    # Callback pour synchroniser les changements de page via la sidebar
+    def sync_menu():
+        st.session_state.page_active = st.session_state._menu_radio
+        
     menu = st.sidebar.radio("Navigation", [
         "🏠 Dashboard", 
         "📝 Enregistrement Client", 
         "🛠️ Dépenses & Maintenance", 
         "⚙️ ADMINISTRATION", 
         "📈 RAPPORT PDF"
-    ])
+    ], index=["🏠 Dashboard", "📝 Enregistrement Client", "🛠️ Dépenses & Maintenance", "⚙️ ADMINISTRATION", "📈 RAPPORT PDF"].index(st.session_state.page_active), key="_menu_radio", on_change=sync_menu)
     
     if st.sidebar.button("Se Déconnecter 🚪"): 
         st.session_state.auth = False
+        st.session_state.page_active = "🏠 Dashboard"
         st.rerun()
 
     # --- 1. DASHBOARD OVERHAUL ---
-    if menu == "🏠 Dashboard":
+    if st.session_state.page_active == "🏠 Dashboard":
         st.header("État du Parc Immobilier")
         st.markdown("Aperçu en temps réel de la disponibilité des **appartements VIP**.")
         st.divider()
@@ -198,12 +209,23 @@ else:
                     html_card = f"""<div class='card card-libre'>
                                     <h3>{app}</h3><p>🟢 LIBRE</p></div>"""
                     st.markdown(html_card, unsafe_allow_html=True)
+                    if st.button(f"Enregistrer Client", key=f"btn_{app}", use_container_width=True):
+                        st.session_state.appart_cible = app
+                        st.session_state.page_active = "📝 Enregistrement Client"
+                        st.rerun()
 
     # --- 2. ENREGISTREMENT CLIENT ---
-    elif menu == "📝 Enregistrement Client":
+    elif st.session_state.page_active == "📝 Enregistrement Client":
         st.header("Nouvelle Fiche Client")
         libres = [a for a in CONFIG["APPARTEMENTS"] if a not in bloques and a not in occupes]
         
+        # Si un appartement a été cliqué depuis le dashboard, on le présélectionne
+        idx_appart = 0
+        if st.session_state.appart_cible and st.session_state.appart_cible in libres:
+            idx_appart = libres.index(st.session_state.appart_cible)
+            # On affiche un petit rappel
+            st.info(f"Logement pré-attribué depuis le Dashboard : **{st.session_state.appart_cible}**")
+            
         if not libres: 
             st.error("⚠️ Impossible d'enregistrer : Tous les appartements sont occupés ou en maintenance.")
         else:
@@ -221,7 +243,7 @@ else:
                 with c3:
                     dent = st.date_input("Date d'Entrée", value=date.today())
                     nuits = st.number_input("Nombre de Nuits *", min_value=1, step=1)
-                    app = st.selectbox("Appartement Attribué", libres)
+                    app = st.selectbox("Appartement Attribué", libres, index=idx_appart)
 
                 st.subheader("Acteurs du Dossier")
                 c_act1, c_act2 = st.columns(2)
@@ -255,11 +277,13 @@ else:
                         
                         if sauver(data, "sejours"): 
                             st.toast("Enregistrement réussi !", icon="✅")
+                            # Réinitialiser la présélection après un succès
+                            st.session_state.appart_cible = None 
                             st.cache_data.clear()
                             st.rerun()
 
     # --- 3. DEPENSES & MAINTENANCE ---
-    elif menu == "🛠️ Dépenses & Maintenance":
+    elif st.session_state.page_active == "🛠️ Dépenses & Maintenance":
         st.header("Gestion Logistique")
         tab1, tab2 = st.tabs(["💸 Trésorerie (Sortie)", "🛠️ Suivi Maintenance"])
         
@@ -303,7 +327,7 @@ else:
                 st.rerun()
 
     # --- 4. ADMINISTRATION ---
-    elif menu == "⚙️ ADMINISTRATION":
+    elif st.session_state.page_active == "⚙️ ADMINISTRATION":
         if st.session_state.role != "admin": 
             st.error("⛔ Zone Accès Réservé à la Direction.")
         else:
@@ -329,7 +353,7 @@ else:
                 st.info(f"La table '{onglet}' est actuellement vide.")
 
     # --- 5. RAPPORT PDF ---
-    elif menu == "📈 RAPPORT PDF":
+    elif st.session_state.page_active == "📈 RAPPORT PDF":
         if st.session_state.role != "admin": 
             st.error("⛔ Zone de comptabilité confidentielle (Direction Uniquement).")
         else:
