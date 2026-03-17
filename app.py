@@ -184,7 +184,7 @@ else:
         if st.session_state.role != "admin": st.error("Accès Admin")
         else:
             st.header("📈 Suivi Financier et Bilans")
-            df_s, df_d = charger("sejours")
+            df_s = charger("sejours")
             df_d = charger("depenses")
             if not df_s.empty:
                 mois_list = sorted(df_s["Mois"].dropna().unique(), reverse=True)
