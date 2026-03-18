@@ -215,8 +215,10 @@ else:
                                     f"{CONFIG['API_URL']}/id/{id_sej}?sheet=sejours",
                                     json={"data": {"Statut": "Terminé", "Date_Sortie": str(datetime.now(CONFIG["TZ_BF"]).date())}}
                                 )
-                                st.toast(f"Séjour de {app} terminé.", icon="✅")
+                                st.toast(f"Séjour de {app} terminé. Actualisation...", icon="✅")
                                 st.cache_data.clear()
+                                import time as time_mod
+                                time_mod.sleep(2)
                                 st.rerun()
                 else:
                     html_card = f"""<div class='card card-libre'>
