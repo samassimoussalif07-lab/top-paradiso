@@ -205,6 +205,19 @@ else:
                                     <h3>{app}</h3><p>🔴 OCCUPÉ</p>
                                     <small>Libre le :<br>{occupes[app]}</small></div>"""
                     st.markdown(html_card, unsafe_allow_html=True)
+                    if st.button("Mettre fin au séjour", key=f"fin_{app}", use_container_width=True):
+                        df_s = charger("sejours")
+                        if not df_s.empty and "Statut" in df_s.columns:
+                            en_cours = df_s[(df_s["Appartement"] == app) & (df_s["Statut"] == "En cours")]
+                            if not en_cours.empty:
+                                id_sej = en_cours.iloc[0]["id"]
+                                st.session_state.api_session.patch(
+                                    f"{CONFIG['API_URL']}/id/{id_sej}?sheet=sejours",
+                                    json={"data": {"Statut": "Terminé", "Date_Sortie": str(datetime.now(CONFIG["TZ_BF"]).date())}}
+                                )
+                                st.toast(f"Séjour de {app} terminé.", icon="✅")
+                                st.cache_data.clear()
+                                st.rerun()
                 else:
                     html_card = f"""<div class='card card-libre'>
                                     <h3>{app}</h3><p>🟢 LIBRE</p></div>"""
