@@ -132,9 +132,23 @@ def imprimer_bilan(mois_code: str, ca: float, comm: float, dep: float, net: floa
             
     return pdf.output(dest="S").encode('latin-1', 'replace')
 
+import extra_streamlit_components as stx
+
+@st.cache_resource
+def get_manager():
+    return stx.CookieManager()
+
+cookie_manager = get_manager()
+
 # --- AUTHENTIFICATION & NAVIGATION ---
 if 'auth' not in st.session_state: 
     st.session_state.auth, st.session_state.role = False, None
+
+# Try to auto-login via cookie
+cookie_role = cookie_manager.get(cookie="auth_role")
+if not st.session_state.auth and cookie_role in ["admin", "employe"]:
+    st.session_state.auth = True
+    st.session_state.role = cookie_role
 
 # Gestion de la redirection depuis le Dashboard
 if 'page_active' not in st.session_state:
@@ -156,9 +170,15 @@ if not st.session_state.auth:
             if submitted:
                 if u == "admin" and p == "patron2024": 
                     st.session_state.auth, st.session_state.role = True, "admin"
+                    cookie_manager.set("auth_role", "admin", expires_at=datetime.now() + timedelta(days=30))
+                    import time as time_mod
+                    time_mod.sleep(0.5)
                     st.rerun()
                 elif u == "employe" and p == "bienvenue": 
                     st.session_state.auth, st.session_state.role = True, "employe"
+                    cookie_manager.set("auth_role", "employe", expires_at=datetime.now() + timedelta(days=30))
+                    import time as time_mod
+                    time_mod.sleep(0.5)
                     st.rerun()
                 else: 
                     st.error("❌ Identifiants incorrects. Accès refusé.")
@@ -182,8 +202,12 @@ else:
     ], index=["🏠 Dashboard", "📝 Enregistrement Client", "🛠️ Dépenses & Maintenance", "⚙️ ADMINISTRATION", "📈 RAPPORT PDF"].index(st.session_state.page_active), key="_menu_radio", on_change=sync_menu)
     
     if st.sidebar.button("Se Déconnecter 🚪"): 
+        cookie_manager.delete("auth_role")
         st.session_state.auth = False
+        st.session_state.role = None
         st.session_state.page_active = "🏠 Dashboard"
+        import time as time_mod
+        time_mod.sleep(0.5)
         st.rerun()
 
     # --- 1. DASHBOARD OVERHAUL ---
