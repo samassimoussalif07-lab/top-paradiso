@@ -134,11 +134,7 @@ def imprimer_bilan(mois_code: str, ca: float, comm: float, dep: float, net: floa
 
 import extra_streamlit_components as stx
 
-@st.cache_resource
-def get_manager():
-    return stx.CookieManager()
-
-cookie_manager = get_manager()
+cookie_manager = stx.CookieManager(key="cookie_manager")
 
 # --- AUTHENTIFICATION & NAVIGATION ---
 if 'auth' not in st.session_state: 
