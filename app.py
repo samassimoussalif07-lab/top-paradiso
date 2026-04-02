@@ -194,21 +194,23 @@ else:
     if choix_theme == "Clair ☀️":
         st.markdown("""
         <style>
-            [data-testid="stAppViewContainer"] { background-color: #ffffff !important; color: #111111 !important; }
+            [data-testid="stAppViewContainer"] { background-color: #ffffff !important; }
             [data-testid="stSidebar"] { background-color: #f0f2f6 !important; }
-            h1, h2, h3, p, span, div { color: #111111; }
-            .stTextInput>div>div>input { background-color: #ffffff; color: #111111; }
+            * { color: #111111 !important; }
+            button:not(.css-12xqq2i) { border-color: #d0d0d0 !important; }
+            .stTextInput>div>div>input { background-color: #ffffff !important; color: #111111 !important; }
+            .card p, .card h3 { color: white !important; } /* Les cartes doivent rester visuellement colorées */
         </style>
         """, unsafe_allow_html=True)
     elif choix_theme == "Sombre 🌙":
         st.markdown("""
         <style>
-            [data-testid="stAppViewContainer"] { background-color: #0e1117 !important; color: #ffffff !important; }
-            [data-testid="stSidebar"] { background-color: #262730 !important; color: #ffffff !important; }
-            h1, h2, h3, p, span, div { color: #ffffff; }
-            .card h3 { color: white !important; }
-            .card p { color: white !important; }
-            .stTextInput>div>div>input { background-color: #0e1117; color: white; }
+            [data-testid="stAppViewContainer"] { background-color: #0e1117 !important; }
+            [data-testid="stSidebar"] { background-color: #262730 !important; }
+            * { color: #fafafa !important; }
+            button:not(.css-12xqq2i) { border-color: #555555 !important; }
+            .stTextInput>div>div>input { background-color: #0e1117 !important; color: white !important; }
+            .card p, .card h3 { color: white !important; }
         </style>
         """, unsafe_allow_html=True)
 
