@@ -43,6 +43,11 @@ st.markdown("""
     div.card-maintenance { background-color: #c0392b; } /* Rouge foncé */
     div.card-occupe { background-color: #e67e22; }      /* Orange */
     div.card-libre { background-color: #27ae60; }       /* Vert */
+    /* Masquage des éléments de Streamlit (bouton Github, Deploy, Footer) */
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    [data-testid="stToolbar"] {visibility: hidden;}
     
     div.card h3 { margin: 0 0 10px 0; color: white; }
     div.card p { margin: 0; font-size: 16px; font-weight: 500;}
@@ -148,7 +153,7 @@ if not st.session_state.auth and cookie_role in ["admin", "employe"]:
 
 # Gestion de la redirection depuis le Dashboard
 if 'page_active' not in st.session_state:
-    st.session_state.page_active = "🏠 Dashboard"
+    st.session_state.page_active = "🏠 Tableau de bord"
 if 'appart_cible' not in st.session_state:
     st.session_state.appart_cible = None
 
@@ -190,24 +195,24 @@ else:
         st.session_state.page_active = st.session_state._menu_radio
         
     menu = st.sidebar.radio("Navigation", [
-        "🏠 Dashboard", 
+        "🏠 Tableau de bord", 
         "📝 Enregistrement Client", 
         "🛠️ Dépenses & Maintenance", 
         "⚙️ ADMINISTRATION", 
         "📈 RAPPORT PDF"
-    ], index=["🏠 Dashboard", "📝 Enregistrement Client", "🛠️ Dépenses & Maintenance", "⚙️ ADMINISTRATION", "📈 RAPPORT PDF"].index(st.session_state.page_active), key="_menu_radio", on_change=sync_menu)
+    ], index=["🏠 Tableau de bord", "📝 Enregistrement Client", "🛠️ Dépenses & Maintenance", "⚙️ ADMINISTRATION", "📈 RAPPORT PDF"].index(st.session_state.page_active), key="_menu_radio", on_change=sync_menu)
     
     if st.sidebar.button("Se Déconnecter 🚪"): 
         cookie_manager.delete("auth_role")
         st.session_state.auth = False
         st.session_state.role = None
-        st.session_state.page_active = "🏠 Dashboard"
+        st.session_state.page_active = "🏠 Tableau de bord"
         import time as time_mod
         time_mod.sleep(0.5)
         st.rerun()
 
     # --- 1. DASHBOARD OVERHAUL ---
-    if st.session_state.page_active == "🏠 Dashboard":
+    if st.session_state.page_active == "🏠 Tableau de bord":
         st.header("État du Parc Immobilier")
         st.markdown("Aperçu en temps réel de la disponibilité des **appartements VIP**.")
         st.divider()
