@@ -190,6 +190,28 @@ else:
     st.sidebar.markdown(f"**Rôle Actif:** `{st.session_state.role.upper()}`")
     st.sidebar.info(f"📍 Ouagadougou : {datetime.now(CONFIG['TZ_BF']).strftime('%H:%M')}")
     
+    choix_theme = st.sidebar.radio("🎨 Thème d'affichage", ["Système", "Clair ☀️", "Sombre 🌙"])
+    if choix_theme == "Clair ☀️":
+        st.markdown("""
+        <style>
+            [data-testid="stAppViewContainer"] { background-color: #ffffff !important; color: #111111 !important; }
+            [data-testid="stSidebar"] { background-color: #f0f2f6 !important; }
+            h1, h2, h3, p, span, div { color: #111111; }
+            .stTextInput>div>div>input { background-color: #ffffff; color: #111111; }
+        </style>
+        """, unsafe_allow_html=True)
+    elif choix_theme == "Sombre 🌙":
+        st.markdown("""
+        <style>
+            [data-testid="stAppViewContainer"] { background-color: #0e1117 !important; color: #ffffff !important; }
+            [data-testid="stSidebar"] { background-color: #262730 !important; color: #ffffff !important; }
+            h1, h2, h3, p, span, div { color: #ffffff; }
+            .card h3 { color: white !important; }
+            .card p { color: white !important; }
+            .stTextInput>div>div>input { background-color: #0e1117; color: white; }
+        </style>
+        """, unsafe_allow_html=True)
+
     # Callback pour synchroniser les changements de page via la sidebar
     def sync_menu():
         st.session_state.page_active = st.session_state._menu_radio
