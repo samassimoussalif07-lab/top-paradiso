@@ -32,6 +32,17 @@ if "api_session" not in st.session_state:
 # --- INJECTION CSS (STYLE DES CARTES) ---
 st.markdown("""
 <style>
+    /* Masquage de l'icône GitHub injectée par Streamlit Cloud */
+    [data-testid="stGitHubIcon"],
+    .viewerBadge_container__1QSob,
+    .styles_viewerBadge__1yB5_,
+    .viewerBadge_link__1S137,
+    .viewerBadge_text__1JaDK,
+    a[href^="https://github.com/"] {
+        display: none !important;
+        visibility: hidden !important;
+    }
+
     div.card {
         padding: 20px;
         border-radius: 12px;
