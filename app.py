@@ -43,11 +43,6 @@ st.markdown("""
     div.card-maintenance { background-color: #c0392b; } /* Rouge foncé */
     div.card-occupe { background-color: #e67e22; }      /* Orange */
     div.card-libre { background-color: #27ae60; }       /* Vert */
-    /* Masquage des éléments de Streamlit (bouton Github, Deploy, Footer) */
-    #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
-    [data-testid="stToolbar"] {visibility: hidden;}
     
     div.card h3 { margin: 0 0 10px 0; color: white; }
     div.card p { margin: 0; font-size: 16px; font-weight: 500;}
@@ -190,30 +185,6 @@ else:
     st.sidebar.markdown(f"**Rôle Actif:** `{st.session_state.role.upper()}`")
     st.sidebar.info(f"📍 Ouagadougou : {datetime.now(CONFIG['TZ_BF']).strftime('%H:%M')}")
     
-    choix_theme = st.sidebar.radio("🎨 Thème d'affichage", ["Système", "Clair ☀️", "Sombre 🌙"])
-    if choix_theme == "Clair ☀️":
-        st.markdown("""
-        <style>
-            [data-testid="stAppViewContainer"] { background-color: #ffffff !important; }
-            [data-testid="stSidebar"] { background-color: #f0f2f6 !important; }
-            * { color: #111111 !important; }
-            button:not(.css-12xqq2i) { border-color: #d0d0d0 !important; }
-            .stTextInput>div>div>input { background-color: #ffffff !important; color: #111111 !important; }
-            .card p, .card h3 { color: white !important; } /* Les cartes doivent rester visuellement colorées */
-        </style>
-        """, unsafe_allow_html=True)
-    elif choix_theme == "Sombre 🌙":
-        st.markdown("""
-        <style>
-            [data-testid="stAppViewContainer"] { background-color: #0e1117 !important; }
-            [data-testid="stSidebar"] { background-color: #262730 !important; }
-            * { color: #fafafa !important; }
-            button:not(.css-12xqq2i) { border-color: #555555 !important; }
-            .stTextInput>div>div>input { background-color: #0e1117 !important; color: white !important; }
-            .card p, .card h3 { color: white !important; }
-        </style>
-        """, unsafe_allow_html=True)
-
     # Callback pour synchroniser les changements de page via la sidebar
     def sync_menu():
         st.session_state.page_active = st.session_state._menu_radio
