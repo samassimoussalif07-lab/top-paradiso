@@ -283,15 +283,19 @@ else:
                     
                     if not est_paye:
                         if st.button("Valider Paiement 💸", key=f"pay_{app}", use_container_width=True):
-                            st.session_state.api_session.patch(
+                            res = st.session_state.api_session.patch(
                                 f"{CONFIG['API_URL']}/id/{info['id_sej']}?sheet=sejours",
                                 json={"data": {"Paiement": "Payé"}}
                             )
-                            st.success("✅ Paiement bien validé ! Mise à jour en cours...")
-                            st.cache_data.clear()
-                            import time as time_mod
-                            time_mod.sleep(2) # Attente légèrement rallongée pour s'assurer que SheetDB s'actualise
-                            st.rerun()
+                            # Vérification stricte si l'API a bien trouvé la colonne
+                            if res.status_code in [200, 201, 204] or "updated" in res.text.lower():
+                                st.success("✅ Paiement bien validé ! Mise à jour en cours...")
+                                st.cache_data.clear()
+                                import time as time_mod
+                                time_mod.sleep(2) # Attente légèrement rallongée
+                                st.rerun()
+                            else:
+                                st.error("❌ Erreur Critique API : La colonne 'Paiement' n'existe pas encore dans votre Google Sheet (onglet 'sejours') ! Veuillez d'abord la créer tout à droite.")
                     
                     pdf_bytes = generer_recu_pdf(info, app)
                     st.download_button("🖨️ Télécharger Reçu", data=pdf_bytes, file_name=f"Recu_{app}.pdf", mime="application/pdf", key=f"dl_{app}", use_container_width=True)
