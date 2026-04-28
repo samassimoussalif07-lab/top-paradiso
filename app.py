@@ -6,6 +6,8 @@ from fpdf import FPDF
 import uuid
 import pytz
 import urllib.parse
+import json
+import os
 
 # --- CONFIGURATION INITIALE ---
 st.set_page_config(page_title="Résidence VIP - Gestion", page_icon="🏢", layout="wide")
@@ -86,6 +88,41 @@ def supprimer_ligne(onglet: str, colonne: str, valeur: str) -> bool:
         return r.status_code in [200, 204]
     except:
         return False
+
+# --- FONCTIONS MESSAGERIE (CHAT) ---
+CHAT_DB_PATH = "chat_db.json"
+CHAT_MEDIA_DIR = "chat_media"
+
+if not os.path.exists(CHAT_MEDIA_DIR):
+    os.makedirs(CHAT_MEDIA_DIR)
+
+def get_chat_messages():
+    if not os.path.exists(CHAT_DB_PATH):
+        return []
+    with open(CHAT_DB_PATH, "r", encoding="utf-8") as f:
+        try:
+            return json.load(f)
+        except:
+            return []
+
+def save_chat_message(msg):
+    msgs = get_chat_messages()
+    msgs.append(msg)
+    with open(CHAT_DB_PATH, "w", encoding="utf-8") as f:
+        json.dump(msgs, f, ensure_ascii=False, indent=2)
+
+def delete_chat_message(msg_id):
+    msgs = get_chat_messages()
+    to_delete = next((m for m in msgs if m["id"] == msg_id), None)
+    if to_delete:
+        msgs.remove(to_delete)
+        if to_delete.get("type") in ["image", "audio"]:
+            path = to_delete.get("content")
+            if path and os.path.exists(path):
+                try: os.remove(path)
+                except: pass
+        with open(CHAT_DB_PATH, "w", encoding="utf-8") as f:
+            json.dump(msgs, f, ensure_ascii=False, indent=2)
 
 # --- LOGIQUE ETATS (OCCUPATION & MAINTENANCE) ---
 def obtenir_etats() -> tuple[dict, dict]:
@@ -238,8 +275,9 @@ else:
         "📝 Enregistrement Client", 
         "🛠️ Dépenses & Maintenance", 
         "⚙️ ADMINISTRATION", 
-        "📈 RAPPORT PDF"
-    ], index=["🏠 Tableau de bord", "📝 Enregistrement Client", "🛠️ Dépenses & Maintenance", "⚙️ ADMINISTRATION", "📈 RAPPORT PDF"].index(st.session_state.page_active), key="_menu_radio", on_change=sync_menu)
+        "📈 RAPPORT PDF",
+        "💬 Messagerie Interne"
+    ], index=["🏠 Tableau de bord", "📝 Enregistrement Client", "🛠️ Dépenses & Maintenance", "⚙️ ADMINISTRATION", "📈 RAPPORT PDF", "💬 Messagerie Interne"].index(st.session_state.page_active), key="_menu_radio", on_change=sync_menu)
     
     if st.sidebar.button("Se Déconnecter 🚪"): 
         cookie_manager.delete("auth_role")
@@ -516,3 +554,90 @@ else:
                         type="primary",
                         use_container_width=True
                     )
+
+    # --- 6. MESSAGERIE INTERNE (CHAT) ---
+    elif st.session_state.page_active == "💬 Messagerie Interne":
+        st.header("💬 Messagerie Équipe")
+        st.markdown("Communiquez en temps réel avec la Direction et les Employés. Vous pouvez supprimer vos messages si besoin.")
+        
+        messages = get_chat_messages()
+        chat_container = st.container(height=500)
+        
+        with chat_container:
+            if not messages:
+                st.info("La discussion est vide. Envoyez le premier message !")
+            
+            for msg in messages:
+                is_admin = (msg["sender"] == "admin")
+                avatar_icon = "👨‍💼" if is_admin else "👤"
+                sender_label = "Direction (Admin)" if is_admin else "Employé(e)"
+                
+                with st.chat_message(sender_label, avatar=avatar_icon):
+                    col_msg, col_del = st.columns([0.9, 0.1])
+                    with col_msg:
+                        st.caption(f"_{msg['timestamp']}_")
+                        if msg["type"] == "text":
+                            st.write(msg["content"])
+                        elif msg["type"] == "image":
+                            st.image(msg["content"], width=300)
+                        elif msg["type"] == "audio":
+                            st.audio(msg["content"])
+                    
+                    with col_del:
+                        if st.button("🗑️", key=f"del_{msg['id']}", help="Supprimer ce message"):
+                            delete_chat_message(msg['id'])
+                            st.rerun()
+
+        st.divider()
+        
+        prompt = st.chat_input("Écrire un message texte...")
+        if prompt:
+            new_msg = {
+                "id": uuid.uuid4().hex,
+                "timestamp": datetime.now(CONFIG["TZ_BF"]).strftime("%d/%m/%Y à %H:%M"),
+                "sender": st.session_state.role,
+                "type": "text",
+                "content": prompt
+            }
+            save_chat_message(new_msg)
+            st.rerun()
+            
+        with st.expander("📎 Envoyer une Photo ou Note Vocale (Média)"):
+            c_img, c_aud = st.columns(2)
+            with c_img:
+                img_file = st.file_uploader("📤 Joindre une Image", type=["png", "jpg", "jpeg"], accept_multiple_files=False)
+                if img_file:
+                    if st.button("Confirmer l'envoi de l'image 🖼️", use_container_width=True):
+                        filename = f"{uuid.uuid4().hex}.jpg"
+                        filepath = os.path.join(CHAT_MEDIA_DIR, filename)
+                        with open(filepath, "wb") as f:
+                            f.write(img_file.getbuffer())
+                        
+                        new_msg = {
+                            "id": uuid.uuid4().hex,
+                            "timestamp": datetime.now(CONFIG["TZ_BF"]).strftime("%d/%m/%Y à %H:%M"),
+                            "sender": st.session_state.role,
+                            "type": "image",
+                            "content": filepath
+                        }
+                        save_chat_message(new_msg)
+                        st.rerun()
+                        
+            with c_aud:
+                aud_file = st.audio_input("🎙️ Enregistrer une note vocale")
+                if aud_file:
+                    if st.button("Confirmer l'envoi du vocal 🎵", use_container_width=True):
+                        filename = f"{uuid.uuid4().hex}.wav"
+                        filepath = os.path.join(CHAT_MEDIA_DIR, filename)
+                        with open(filepath, "wb") as f:
+                            f.write(aud_file.getbuffer())
+                            
+                        new_msg = {
+                            "id": uuid.uuid4().hex,
+                            "timestamp": datetime.now(CONFIG["TZ_BF"]).strftime("%d/%m/%Y à %H:%M"),
+                            "sender": st.session_state.role,
+                            "type": "audio",
+                            "content": filepath
+                        }
+                        save_chat_message(new_msg)
+                        st.rerun()
