@@ -1,3 +1,4 @@
+https://replit.com/refer/samassimoussali
 import streamlit as st
 import pandas as pd
 import requests
@@ -5,6 +6,7 @@ from datetime import datetime, date, time, timedelta
 from fpdf import FPDF
 import uuid
 import pytz
+import urllib.parse
 
 # --- CONFIGURATION INITIALE ---
 st.set_page_config(page_title="Résidence VIP - Gestion", page_icon="🏢", layout="wide")
@@ -61,7 +63,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
 # --- FONCTIONS API ---
 @st.cache_data(ttl=5) # Cache très court
 def charger(onglet: str) -> pd.DataFrame:
@@ -105,7 +106,14 @@ def obtenir_etats() -> tuple[dict, dict]:
                 ds = str(row.get("Date_Sortie"))
                 h_lib = CONFIG["TZ_BF"].localize(datetime.combine(datetime.strptime(ds, "%Y-%m-%d"), time(11, 0)))
                 if now < h_lib: 
-                    occupes[str(row.get("Appartement"))] = h_lib.strftime("%d/%m/%Y à 11h00")
+                    occupes[str(row.get("Appartement"))] = {
+                        "fin": h_lib.strftime("%d/%m/%Y à 11h00"),
+                        "paiement": str(row.get("Paiement", "Non Payé")),
+                        "id_sej": str(row.get("id", "")),
+                        "client": str(row.get("Client_Nom", "")),
+                        "montant": float(row.get("Montant_Total", 0) or 0),
+                        "tel": str(row.get("Tel_Client", ""))
+                    }
             except:
                 continue
     return bloques, occupes
@@ -141,6 +149,31 @@ def imprimer_bilan(mois_code: str, ca: float, comm: float, dep: float, net: floa
             ligne_depense = f"- {r.get('Date','')} | {r.get('Motif','')} ({r.get('Appartement','')}) : {int(r.get('Montant',0)):,} F"
             pdf.cell(0, 8, clean_txt(ligne_depense), ln=True)
             
+    return pdf.output(dest="S").encode('latin-1', 'replace')
+
+def generer_recu_pdf(info: dict, appart: str) -> bytes:
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    
+    def clean_txt(text):
+        return str(text).encode('latin-1', 'replace').decode('latin-1')
+
+    pdf.cell(0, 10, clean_txt("REÇU DE SÉJOUR - RÉSIDENCE VIP"), ln=True, align="C")
+    pdf.ln(10)
+    
+    pdf.set_font("Arial", "", 12)
+    pdf.cell(0, 10, clean_txt(f"Appartement : {appart}"), ln=True)
+    pdf.cell(0, 10, clean_txt(f"Client : {info.get('client', '')}"), ln=True)
+    pdf.cell(0, 10, clean_txt(f"Numéro Téléphone : {info.get('tel', '')}"), ln=True)
+    pdf.cell(0, 10, clean_txt(f"Montant Total : {int(info.get('montant', 0)):,} F CFA".replace(',', ' ')), ln=True)
+    pdf.cell(0, 10, clean_txt(f"Statut du paiement : {info.get('paiement', 'Non Payé')}"), ln=True)
+    pdf.cell(0, 10, clean_txt(f"Fin du séjour : {info.get('fin', '')}"), ln=True)
+    
+    pdf.ln(20)
+    pdf.set_font("Arial", "I", 10)
+    pdf.cell(0, 10, clean_txt("Merci de votre confiance. La Direction."), ln=True, align="C")
+    
     return pdf.output(dest="S").encode('latin-1', 'replace')
 
 import extra_streamlit_components as stx
@@ -232,25 +265,46 @@ else:
                                     <small>{bloques[app]}</small></div>"""
                     st.markdown(html_card, unsafe_allow_html=True)
                 elif app in occupes:
+                    info = occupes[app]
+                    etat_paiement = info.get("paiement", "Non Payé")
+                    color_paiement = "#e74c3c" if etat_paiement != "Payé" else "#2ecc71"
+                    
                     html_card = f"""<div class='card card-occupe'>
                                     <h3>{app}</h3><p>🔴 OCCUPÉ</p>
-                                    <small>Libre le :<br>{occupes[app]}</small></div>"""
+                                    <small>Libre le :<br>{info['fin']}</small>
+                                    <br><span style='background-color:{color_paiement}; color:white; padding: 2px 6px; border-radius:4px; font-size:12px;'>Paiement : {etat_paiement}</span>
+                                    </div>"""
                     st.markdown(html_card, unsafe_allow_html=True)
+                    
+                    if etat_paiement != "Payé":
+                        if st.button("Valider Paiement 💸", key=f"pay_{app}", use_container_width=True):
+                            st.session_state.api_session.patch(
+                                f"{CONFIG['API_URL']}/id/{info['id_sej']}?sheet=sejours",
+                                json={"data": {"Paiement": "Payé"}}
+                            )
+                            st.toast("Paiement validé !", icon="✅")
+                            st.cache_data.clear()
+                            import time as time_mod
+                            time_mod.sleep(1)
+                            st.rerun()
+                    
+                    pdf_bytes = generer_recu_pdf(info, app)
+                    st.download_button("🖨️ Télécharger Reçu", data=pdf_bytes, file_name=f"Recu_{app}.pdf", mime="application/pdf", key=f"dl_{app}", use_container_width=True)
+                    
+                    msg = f"Bonjour {info['client']}, voici le récapitulatif de votre séjour à {app}. Montant total: {int(info['montant']):,} F CFA. Statut du paiement: {etat_paiement}."
+                    url_msg = urllib.parse.quote(msg)
+                    st.markdown(f"<a href='https://wa.me/{info['tel'].replace('+', '')}?text={url_msg}' target='_blank' style='display:block; text-align:center; background-color:#25D366; color:white; padding:8px; border-radius:4px; text-decoration:none; margin-bottom:5px; font-size:14px;'>📱 Envoyer Reçu (WhatsApp)</a>", unsafe_allow_html=True)
+
                     if st.button("Mettre fin au séjour", key=f"fin_{app}", use_container_width=True):
-                        df_s = charger("sejours")
-                        if not df_s.empty and "Statut" in df_s.columns:
-                            en_cours = df_s[(df_s["Appartement"] == app) & (df_s["Statut"] == "En cours")]
-                            if not en_cours.empty:
-                                id_sej = en_cours.iloc[0]["id"]
-                                st.session_state.api_session.patch(
-                                    f"{CONFIG['API_URL']}/id/{id_sej}?sheet=sejours",
-                                    json={"data": {"Statut": "Terminé", "Date_Sortie": str(datetime.now(CONFIG["TZ_BF"]).date())}}
-                                )
-                                st.toast(f"Séjour de {app} terminé. Actualisation...", icon="✅")
-                                st.cache_data.clear()
-                                import time as time_mod
-                                time_mod.sleep(2)
-                                st.rerun()
+                        st.session_state.api_session.patch(
+                            f"{CONFIG['API_URL']}/id/{info['id_sej']}?sheet=sejours",
+                            json={"data": {"Statut": "Terminé", "Date_Sortie": str(datetime.now(CONFIG["TZ_BF"]).date())}}
+                        )
+                        st.toast(f"Séjour de {app} terminé. Actualisation...", icon="✅")
+                        st.cache_data.clear()
+                        import time as time_mod
+                        time_mod.sleep(2)
+                        st.rerun()
                 else:
                     html_card = f"""<div class='card card-libre'>
                                     <h3>{app}</h3><p>🟢 LIBRE</p></div>"""
@@ -283,13 +337,18 @@ else:
                     dnais = st.date_input("Date de Naissance", value=date(1990,1,1), min_value=date(1920,1,1))
                     prov = st.text_input("Provenance (Pays/Ville)")
                 with c2:
-                    tel = st.text_input("Telephone Client *", placeholder="+226 ...")
+                    col_ind, col_tel = st.columns([1, 2])
+                    with col_ind:
+                        indicatif = st.text_input("Indicatif", value="+226")
+                    with col_tel:
+                        tel = st.text_input("Téléphone *", placeholder="70 00 00 00")
                     piece = st.selectbox("Type Pièce", ["CNI", "Passeport", "Permis", "Carte Séjour"])
                     pnum = st.text_input("N° Pièce *")
                 with c3:
                     dent = st.date_input("Date d'Entrée", value=date.today())
                     nuits = st.number_input("Nombre de Nuits *", min_value=1, step=1)
                     app = st.selectbox("Appartement Attribué", libres, index=idx_appart)
+                    statut_paiement = st.selectbox("Statut Paiement", ["Non Payé", "Payé"])
 
                 st.subheader("Acteurs du Dossier")
                 c_act1, c_act2 = st.columns(2)
@@ -312,13 +371,15 @@ else:
                         # Identifiant Propre
                         nouvel_id = f"VIP-{uuid.uuid4().hex[:6].upper()}"
                         
+                        tel_complet = f"{indicatif}{tel}".replace(" ", "")
                         data = {
                             "id": nouvel_id, "Client_Nom": nom, "Date_Naissance": str(dnais), "Provenance": prov,
-                            "Piece_Type": piece, "Piece_Num": pnum, "Tel_Client": tel, "Date_Entree": str(dent), 
+                            "Piece_Type": piece, "Piece_Num": pnum, "Tel_Client": tel_complet, "Date_Entree": str(dent), 
                             "Date_Sortie": str(dsor), "Raison": rais_s, "Appartement": app, "Employe_Nom": enom, 
                             "Employe_Tel": etel, "Demarcheur_Nom": "Aucun" if not dnom else dnom, 
                             "Demarcheur_Tel": "Aucun" if not dtel else dtel, "Montant_Total": total, 
-                            "Commission": comm, "Mois": dent.strftime("%m-%Y"), "Statut": "En cours"
+                            "Commission": comm, "Mois": dent.strftime("%m-%Y"), "Statut": "En cours",
+                            "Paiement": statut_paiement
                         }
                         
                         if sauver(data, "sejours"): 
@@ -446,3 +507,4 @@ else:
                         type="primary",
                         use_container_width=True
                     )
+
