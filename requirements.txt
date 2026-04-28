@@ -4,3 +4,4 @@ requests
 fpdf
 extra-streamlit-components
 pytz
+urllib.parse
