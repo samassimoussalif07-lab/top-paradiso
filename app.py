@@ -62,6 +62,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+
 # --- FONCTIONS API ---
 @st.cache_data(ttl=5) # Cache très court
 def charger(onglet: str) -> pd.DataFrame:
@@ -265,26 +266,31 @@ else:
                     st.markdown(html_card, unsafe_allow_html=True)
                 elif app in occupes:
                     info = occupes[app]
-                    etat_paiement = info.get("paiement", "Non Payé")
-                    color_paiement = "#e74c3c" if etat_paiement != "Payé" else "#2ecc71"
+                    etat_paiement = str(info.get("paiement", "Non Payé")).strip()
+                    # Vérification ultra-robuste pour s'assurer que ça capture "Payé" ou "paye" même avec des espaces invisibles
+                    est_paye = (etat_paiement == "Payé" or etat_paiement.lower() == "payé" or etat_paiement.lower() == "paye")
+                    
+                    # On le reformate pour être sûr qu'il est propre et joli
+                    affichage_paiement = "Payé" if est_paye else "Non Payé"
+                    color_paiement = "#2ecc71" if est_paye else "#e74c3c"
                     
                     html_card = f"""<div class='card card-occupe'>
                                     <h3>{app}</h3><p>🔴 OCCUPÉ</p>
                                     <small>Libre le :<br>{info['fin']}</small>
-                                    <br><span style='background-color:{color_paiement}; color:white; padding: 2px 6px; border-radius:4px; font-size:12px;'>Paiement : {etat_paiement}</span>
+                                    <br><span style='background-color:{color_paiement}; color:white; padding: 2px 6px; border-radius:4px; font-size:12px;'>Paiement : {affichage_paiement}</span>
                                     </div>"""
                     st.markdown(html_card, unsafe_allow_html=True)
                     
-                    if etat_paiement != "Payé":
+                    if not est_paye:
                         if st.button("Valider Paiement 💸", key=f"pay_{app}", use_container_width=True):
                             st.session_state.api_session.patch(
                                 f"{CONFIG['API_URL']}/id/{info['id_sej']}?sheet=sejours",
                                 json={"data": {"Paiement": "Payé"}}
                             )
-                            st.toast("Paiement validé !", icon="✅")
+                            st.success("✅ Paiement bien validé ! Mise à jour en cours...")
                             st.cache_data.clear()
                             import time as time_mod
-                            time_mod.sleep(1)
+                            time_mod.sleep(2) # Attente légèrement rallongée pour s'assurer que SheetDB s'actualise
                             st.rerun()
                     
                     pdf_bytes = generer_recu_pdf(info, app)
@@ -506,4 +512,3 @@ else:
                         type="primary",
                         use_container_width=True
                     )
-
