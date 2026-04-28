@@ -1,4 +1,3 @@
-https://replit.com/refer/samassimoussali
 import streamlit as st
 import pandas as pd
 import requests
