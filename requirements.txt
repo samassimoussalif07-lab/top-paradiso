@@ -3,3 +3,4 @@ pandas
 requests
 fpdf
 extra-streamlit-components
+pytz
