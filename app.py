@@ -143,7 +143,14 @@ def obtenir_etats() -> tuple[dict, dict]:
                 ds = str(row.get("Date_Sortie"))
                 h_lib = CONFIG["TZ_BF"].localize(datetime.combine(datetime.strptime(ds, "%Y-%m-%d"), time(11, 0)))
                 if now < h_lib: 
+                    try:
+                        de = str(row.get("Date_Entree", ""))
+                        debut_str = "/".join(de.split("-")[::-1]) if "-" in de else de
+                    except:
+                        debut_str = ""
+                        
                     occupes[str(row.get("Appartement"))] = {
+                        "debut": debut_str,
                         "fin": h_lib.strftime("%d/%m/%Y à 11h00"),
                         "paiement": str(row.get("Paiement", "Non Payé")),
                         "id_sej": str(row.get("id", "")),
@@ -219,6 +226,7 @@ def generer_recu_pdf(info: dict, appart: str) -> bytes:
     pdf.set_font("Arial", "", 11)
     pdf.cell(0, 6, clean_txt(f"Client : {info.get('client', '')}"), ln=True)
     pdf.cell(0, 6, clean_txt(f"Téléphone : {info.get('tel', '')}"), ln=True)
+    pdf.cell(0, 6, clean_txt(f"Début du séjour : {info.get('debut', '')}"), ln=True)
     pdf.cell(0, 6, clean_txt(f"Fin du séjour : {info.get('fin', '')}"), ln=True)
     pdf.ln(8)
     
