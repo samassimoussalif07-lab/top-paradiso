@@ -10,7 +10,7 @@ import json
 import os
 
 # --- CONFIGURATION INITIALE ---
-st.set_page_config(page_title="Résidence VIP - Gestion", page_icon="🏢", layout="wide")
+st.set_page_config(page_title="Résidence PARADISO - Gestion", page_icon="🏢", layout="wide")
 
 CONFIG = {
     "API_URL": "https://sheetdb.io/api/v1/2a307403dpyom",
@@ -191,25 +191,54 @@ def imprimer_bilan(mois_code: str, ca: float, comm: float, dep: float, net: floa
 def generer_recu_pdf(info: dict, appart: str) -> bytes:
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
     
     def clean_txt(text):
         return str(text).encode('latin-1', 'replace').decode('latin-1')
 
-    pdf.cell(0, 10, clean_txt("REÇU DE SÉJOUR - RÉSIDENCE VIP"), ln=True, align="C")
+    # En-tête professionnel
+    pdf.set_font("Arial", "B", 20)
+    pdf.set_text_color(44, 62, 80) # Couleur bleu nuit/gris foncé
+    pdf.cell(0, 12, clean_txt("RÉSIDENCE PARADISO"), ln=True, align="C")
+    
+    pdf.set_font("Arial", "", 11)
+    pdf.set_text_color(127, 140, 141) # Couleur grise
+    pdf.cell(0, 6, clean_txt("Téléphone de la résidence : +226 64353550"), ln=True, align="C")
+    
+    pdf.ln(5)
+    pdf.set_draw_color(189, 195, 199)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y()) # Ligne de séparation
     pdf.ln(10)
     
-    pdf.set_font("Arial", "", 12)
-    pdf.cell(0, 10, clean_txt(f"Appartement : {appart}"), ln=True)
-    pdf.cell(0, 10, clean_txt(f"Client : {info.get('client', '')}"), ln=True)
-    pdf.cell(0, 10, clean_txt(f"Numéro Téléphone : {info.get('tel', '')}"), ln=True)
-    pdf.cell(0, 10, clean_txt(f"Montant Total : {int(info.get('montant', 0)):,} F CFA".replace(',', ' ')), ln=True)
-    pdf.cell(0, 10, clean_txt(f"Statut du paiement : {info.get('paiement', 'Non Payé')}"), ln=True)
-    pdf.cell(0, 10, clean_txt(f"Fin du séjour : {info.get('fin', '')}"), ln=True)
+    # Titre du document
+    pdf.set_font("Arial", "B", 14)
+    pdf.set_text_color(0, 0, 0) # Noir
+    pdf.cell(0, 10, clean_txt("REÇU DE SÉJOUR"), ln=True, align="C")
+    pdf.ln(8)
     
-    pdf.ln(20)
+    # Corps du reçu avec espacement élégant
+    pdf.set_font("Arial", "", 12)
+    hauteur_ligne = 8
+    pdf.cell(0, hauteur_ligne, clean_txt(f"Appartement : {appart}"), ln=True)
+    pdf.cell(0, hauteur_ligne, clean_txt(f"Client : {info.get('client', '')}"), ln=True)
+    pdf.cell(0, hauteur_ligne, clean_txt(f"Tel. Client : {info.get('tel', '')}"), ln=True)
+    
+    pdf.set_font("Arial", "B", 12) # Montant bien mis en évidence
+    pdf.cell(0, hauteur_ligne, clean_txt(f"Montant Total : {int(info.get('montant', 0)):,} F CFA".replace(',', ' ')), ln=True)
+    
+    pdf.set_font("Arial", "", 12)
+    pdf.cell(0, hauteur_ligne, clean_txt(f"Statut du paiement : {info.get('paiement', 'Non Payé')}"), ln=True)
+    pdf.cell(0, hauteur_ligne, clean_txt(f"Fin du séjour : {info.get('fin', '')}"), ln=True)
+    
+    # Pied de page
+    pdf.ln(15)
+    pdf.set_draw_color(189, 195, 199)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y()) # Ligne de séparation
+    pdf.ln(5)
+    
     pdf.set_font("Arial", "I", 10)
-    pdf.cell(0, 10, clean_txt("Merci de votre confiance. La Direction."), ln=True, align="C")
+    pdf.set_text_color(127, 140, 141)
+    pdf.cell(0, 10, clean_txt("Merci de votre confiance. Contactez-nous pour toute assistance."), ln=True, align="C")
+    pdf.cell(0, 5, clean_txt("La Direction PARADISO."), ln=True, align="C")
     
     return pdf.output(dest="S").encode('latin-1', 'replace')
 
@@ -234,7 +263,7 @@ if 'appart_cible' not in st.session_state:
     st.session_state.appart_cible = None
 
 if not st.session_state.auth:
-    st.title("🔐 Résidence VIP - Interface Sécurisée")
+    st.title("🔐 Résidence PARADISO - Interface Sécurisée")
     st.markdown("Veuillez entrer vos identifiants pour accéder à l'interface de gestion.")
     
     l_col, _ = st.columns([1, 2])
