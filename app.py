@@ -215,19 +215,57 @@ def generer_recu_pdf(info: dict, appart: str) -> bytes:
     pdf.cell(0, 10, clean_txt("REÇU DE SÉJOUR"), ln=True, align="C")
     pdf.ln(8)
     
-    # Corps du reçu avec espacement élégant
-    pdf.set_font("Arial", "", 12)
-    hauteur_ligne = 8
-    pdf.cell(0, hauteur_ligne, clean_txt(f"Appartement : {appart}"), ln=True)
-    pdf.cell(0, hauteur_ligne, clean_txt(f"Client : {info.get('client', '')}"), ln=True)
-    pdf.cell(0, hauteur_ligne, clean_txt(f"Tel. Client : {info.get('tel', '')}"), ln=True)
+    # Info Client Simple
+    pdf.set_font("Arial", "", 11)
+    pdf.cell(0, 6, clean_txt(f"Client : {info.get('client', '')}"), ln=True)
+    pdf.cell(0, 6, clean_txt(f"Téléphone : {info.get('tel', '')}"), ln=True)
+    pdf.cell(0, 6, clean_txt(f"Fin du séjour : {info.get('fin', '')}"), ln=True)
+    pdf.ln(8)
     
-    pdf.set_font("Arial", "B", 12) # Montant bien mis en évidence
-    pdf.cell(0, hauteur_ligne, clean_txt(f"Montant Total : {int(info.get('montant', 0)):,} F CFA".replace(',', ' ')), ln=True)
+    # Détails Financiers (Tableau Quadrillé)
+    montant = int(info.get('montant', 0))
+    prix_unitaire = 15000  # PRIX_NUITEE (15000 par défaut dans l'app)
+    nuits = montant // prix_unitaire if prix_unitaire else 0
     
-    pdf.set_font("Arial", "", 12)
-    pdf.cell(0, hauteur_ligne, clean_txt(f"Statut du paiement : {info.get('paiement', 'Non Payé')}"), ln=True)
-    pdf.cell(0, hauteur_ligne, clean_txt(f"Fin du séjour : {info.get('fin', '')}"), ln=True)
+    # En-tête Tableau
+    pdf.set_font("Arial", "B", 11)
+    pdf.set_fill_color(236, 240, 241) # Fond gris clair
+    pdf.set_draw_color(189, 195, 199) # Bordures
+    
+    # Largeur des colonnes (Total = 190)
+    w_des = 80
+    w_pu = 35
+    w_qte = 25
+    w_tot = 50
+    
+    pdf.cell(w_des, 8, clean_txt("Désignation"), border=1, align="C", fill=True)
+    pdf.cell(w_pu, 8, clean_txt("Prix Unitaire"), border=1, align="C", fill=True)
+    pdf.cell(w_qte, 8, clean_txt("Nuits"), border=1, align="C", fill=True)
+    pdf.cell(w_tot, 8, clean_txt("Total"), border=1, align="C", fill=True, ln=True)
+    
+    # Ligne de données
+    pdf.set_font("Arial", "", 11)
+    pdf.cell(w_des, 10, clean_txt(f"Séjour - {appart}"), border=1)
+    pdf.cell(w_pu, 10, clean_txt(f"{prix_unitaire:,} F".replace(',', ' ')), border=1, align="R")
+    pdf.cell(w_qte, 10, clean_txt(str(nuits)), border=1, align="C")
+    pdf.cell(w_tot, 10, clean_txt(f"{montant:,} F CFA".replace(',', ' ')), border=1, align="R", ln=True)
+    
+    # Résumé Paiement
+    pdf.ln(8)
+    
+    val_paye = str(info.get('paiement', '')).strip().lower()
+    est_paye = (val_paye == "payé" or val_paye == "paye")
+    statut_str = "RÉGLÉ" if est_paye else "NON RÉGLÉ"
+    
+    # Mettre en couleur le statut final
+    if est_paye:
+        pdf.set_text_color(39, 174, 96) # Vert pour réglé
+    else:
+        pdf.set_text_color(192, 57, 43) # Rouge pour non réglé
+        
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(190, 8, clean_txt(f"STATUT PAIE. : {statut_str}"), align="R", ln=True)
+    pdf.set_text_color(0, 0, 0) # Rétablir le noir
     
     # Pied de page
     pdf.ln(15)
