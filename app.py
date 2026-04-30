@@ -166,33 +166,101 @@ def obtenir_etats() -> tuple[dict, dict]:
 def imprimer_bilan(mois_code: str, ca: float, comm: float, dep: float, net: float, df_dep: pd.DataFrame) -> bytes:
     m_num, annee = mois_code.split("-")
     nom_mois = MOIS_FR.get(m_num, "INCONNU")
-    titre_bilan = f"BILAN DU MOIS DE {nom_mois} {annee}"
+    titre_bilan = f"BILAN MENSUEL - {nom_mois} {annee}"
 
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
     
-    # Nettoyage des accents pour FPDF (qui ne gère nativement que latin-1)
     def clean_txt(text):
         return str(text).encode('latin-1', 'replace').decode('latin-1')
 
-    pdf.cell(0, 10, clean_txt(titre_bilan), ln=True, align="R")
-    pdf.ln(20)
+    # En-tête professionnel
+    pdf.set_font("Arial", "B", 20)
+    pdf.set_text_color(44, 62, 80) # Bleu nuit
+    pdf.cell(0, 12, clean_txt("RÉSIDENCE PARADISO"), ln=True, align="C")
     
-    pdf.set_font("Arial", "B", 12)
-    pdf.cell(0, 10, clean_txt(f"CHIFFRE D'AFFAIRES BRUT : {int(ca):,} F"), ln=True)
-    pdf.cell(0, 10, clean_txt(f"TOTAL COMMISSIONS : {int(comm):,} F"), ln=True)
-    pdf.cell(0, 10, clean_txt(f"TOTAL DEPENSES : {int(dep):,} F"), ln=True)
-    pdf.cell(0, 10, clean_txt(f"MONTANT NET RESTANT : {int(net):,} F"), ln=True)
-    pdf.ln(20)
-    
-    pdf.cell(0, 10, clean_txt("DETAIL DES DEPENSES :"), ln=True)
     pdf.set_font("Arial", "", 11)
+    pdf.set_text_color(127, 140, 141) # Gris
+    pdf.cell(0, 6, clean_txt("Téléphone de la résidence : +226 64353550"), ln=True, align="C")
+    
+    pdf.ln(5)
+    pdf.set_draw_color(189, 195, 199)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y()) # Séparateur
+    pdf.ln(10)
+
+    # Titre du bilan
+    pdf.set_font("Arial", "B", 14)
+    pdf.set_text_color(0, 0, 0) # Noir
+    pdf.cell(0, 10, clean_txt(titre_bilan), ln=True, align="C")
+    pdf.ln(8)
+    
+    # Résumé Financier (Tableau)
+    pdf.set_font("Arial", "B", 11)
+    pdf.set_fill_color(236, 240, 241) # Fond gris clair
+    pdf.set_draw_color(189, 195, 199) # Bordures
+    
+    # Largeurs colonnes
+    w1, w2 = 95, 95
+    
+    # Ligne 1 : CA
+    pdf.cell(w1, 10, clean_txt("CHIFFRE D'AFFAIRES BRUT"), border=1, align="L", fill=True)
+    pdf.set_font("Arial", "", 11)
+    pdf.cell(w2, 10, clean_txt(f"{int(ca):,} F CFA".replace(',', ' ')), border=1, align="R", ln=True)
+    
+    # Ligne 2 : Commissions
+    pdf.set_font("Arial", "B", 11)
+    pdf.cell(w1, 10, clean_txt("TOTAL COMMISSIONS"), border=1, align="L", fill=True)
+    pdf.set_font("Arial", "", 11)
+    pdf.cell(w2, 10, clean_txt(f"{int(comm):,} F CFA".replace(',', ' ')), border=1, align="R", ln=True)
+    
+    # Ligne 3 : Dépenses
+    pdf.set_font("Arial", "B", 11)
+    pdf.cell(w1, 10, clean_txt("TOTAL DÉPENSES"), border=1, align="L", fill=True)
+    pdf.set_font("Arial", "", 11)
+    pdf.cell(w2, 10, clean_txt(f"{int(dep):,} F CFA".replace(',', ' ')), border=1, align="R", ln=True)
+    
+    # Ligne 4 : NET
+    pdf.set_font("Arial", "B", 12)
+    pdf.set_text_color(39, 174, 96) # Vert pour le bénéfice
+    pdf.cell(w1, 10, clean_txt("BÉNÉFICE NET RESTANT"), border=1, align="L", fill=True)
+    pdf.cell(w2, 10, clean_txt(f"{int(net):,} F CFA".replace(',', ' ')), border=1, align="R", ln=True)
+    
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(15)
+    
+    # Détail des dépenses (Tableau)
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(0, 10, clean_txt("DÉTAIL DES DÉPENSES :"), ln=True)
+    
     if not df_dep.empty:
+        pdf.set_font("Arial", "B", 10)
+        pdf.set_fill_color(236, 240, 241)
+        w_date, w_motif, w_app, w_mont = 25, 95, 30, 40
+        
+        pdf.cell(w_date, 8, clean_txt("Date"), border=1, align="C", fill=True)
+        pdf.cell(w_motif, 8, clean_txt("Motif"), border=1, align="C", fill=True)
+        pdf.cell(w_app, 8, clean_txt("Appart."), border=1, align="C", fill=True)
+        pdf.cell(w_mont, 8, clean_txt("Montant"), border=1, align="C", fill=True, ln=True)
+        
+        pdf.set_font("Arial", "", 10)
         for _, r in df_dep.iterrows():
-            ligne_depense = f"- {r.get('Date','')} | {r.get('Motif','')} ({r.get('Appartement','')}) : {int(r.get('Montant',0)):,} F"
-            pdf.cell(0, 8, clean_txt(ligne_depense), ln=True)
+            pdf.cell(w_date, 8, clean_txt(r.get('Date','')), border=1, align="C")
+            pdf.cell(w_motif, 8, clean_txt(str(r.get('Motif',''))[:50]), border=1, align="L")
+            pdf.cell(w_app, 8, clean_txt(r.get('Appartement','')), border=1, align="C")
+            pdf.cell(w_mont, 8, clean_txt(f"{int(r.get('Montant',0)):,} F".replace(',', ' ')), border=1, align="R", ln=True)
+    else:
+        pdf.set_font("Arial", "I", 11)
+        pdf.cell(0, 10, clean_txt("Aucune dépense enregistrée sur ce mois."), ln=True)
             
+    # Pied de page
+    pdf.ln(15)
+    pdf.set_draw_color(189, 195, 199)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.ln(5)
+    pdf.set_font("Arial", "I", 10)
+    pdf.set_text_color(127, 140, 141)
+    pdf.cell(0, 10, clean_txt("Document généré automatiquement par le système Résidence PARADISO."), ln=True, align="C")
+    
     return pdf.output(dest="S").encode('latin-1', 'replace')
 
 def generer_recu_pdf(info: dict, appart: str) -> bytes:
@@ -348,11 +416,12 @@ else:
     menu = st.sidebar.radio("Navigation", [
         "🏠 Tableau de bord", 
         "📝 Enregistrement Client", 
+        "🗂️ Historique des Séjours",
         "🛠️ Dépenses & Maintenance", 
         "⚙️ ADMINISTRATION", 
         "📈 RAPPORT PDF",
         "💬 Messagerie Interne"
-    ], index=["🏠 Tableau de bord", "📝 Enregistrement Client", "🛠️ Dépenses & Maintenance", "⚙️ ADMINISTRATION", "📈 RAPPORT PDF", "💬 Messagerie Interne"].index(st.session_state.page_active), key="_menu_radio", on_change=sync_menu)
+    ], index=["🏠 Tableau de bord", "📝 Enregistrement Client", "🗂️ Historique des Séjours", "🛠️ Dépenses & Maintenance", "⚙️ ADMINISTRATION", "📈 RAPPORT PDF", "💬 Messagerie Interne"].index(st.session_state.page_active), key="_menu_radio", on_change=sync_menu)
     
     if st.sidebar.button("Se Déconnecter 🚪"): 
         cookie_manager.delete("auth_role")
@@ -511,7 +580,151 @@ else:
                             st.cache_data.clear()
                             st.rerun()
 
-    # --- 3. DEPENSES & MAINTENANCE ---
+    # --- 3. HISTORIQUE ET EDITION CLIENTS ---
+    elif st.session_state.page_active == "🗂️ Historique des Séjours":
+        st.header("🗂️ Historique des Séjours & Édition")
+        st.markdown("Recherchez un client, modifiez ses informations ou générez son reçu (même après son départ).")
+        
+        df_sejours = charger("sejours")
+        if df_sejours.empty:
+            st.info("Aucun séjour enregistré pour le moment.")
+        else:
+            # Tri par date de création/entrée (le plus récent en premier)
+            if "Date_Entree" in df_sejours.columns:
+                df_sejours = df_sejours.sort_values(by="Date_Entree", ascending=False)
+            
+            # Barre de recherche
+            search_query = st.text_input("🔍 Rechercher par Nom de client, Téléphone ou Appartement :", "")
+            
+            # Filtrage
+            df_filtered = df_sejours.copy()
+            if search_query:
+                query_lower = search_query.lower()
+                df_filtered = df_filtered[
+                    df_filtered["Client_Nom"].astype(str).str.lower().str.contains(query_lower) |
+                    df_filtered["Tel_Client"].astype(str).str.lower().str.contains(query_lower) |
+                    df_filtered["Appartement"].astype(str).str.lower().str.contains(query_lower)
+                ]
+            
+            # Sélection du séjour
+            st.write("---")
+            if df_filtered.empty:
+                st.warning("Aucun résultat pour cette recherche.")
+            else:
+                options = []
+                for _, row in df_filtered.iterrows():
+                    nom = row.get("Client_Nom", "Inconnu")
+                    app = row.get("Appartement", "?")
+                    debut = row.get("Date_Entree", "")
+                    statut = row.get("Statut", "")
+                    id_sej = row.get("id", "")
+                    options.append(f"{nom} | {app} | Du {debut} | [{statut}] (ID: {id_sej})")
+                
+                selected_option = st.selectbox("Sélectionnez un séjour pour voir/modifier les détails :", options)
+                
+                if selected_option:
+                    selected_id = selected_option.split("(ID: ")[-1].replace(")", "").strip()
+                    selected_row = df_sejours[df_sejours["id"] == selected_id].iloc[0]
+                    
+                    st.write("---")
+                    st.subheader(f"Détails de : {selected_row.get('Client_Nom', '')}")
+                    
+                    # Section PDF Reçu Rapide
+                    info_recu = {
+                        "client": str(selected_row.get("Client_Nom", "")),
+                        "tel": str(selected_row.get("Tel_Client", "")),
+                        "debut": str(selected_row.get("Date_Entree", "")),
+                        "fin": str(selected_row.get("Date_Sortie", "")),
+                        "montant": float(selected_row.get("Montant_Total", 0) or 0),
+                        "paiement": str(selected_row.get("Paiement", "Non Payé"))
+                    }
+                    pdf_bytes = generer_recu_pdf(info_recu, str(selected_row.get("Appartement", "")))
+                    st.download_button(
+                        "🖨️ Télécharger le Reçu PDF de ce séjour", 
+                        data=pdf_bytes, 
+                        file_name=f"Recu_{selected_row.get('Appartement', '')}_{selected_row.get('Client_Nom', '')}.pdf", 
+                        mime="application/pdf", 
+                        type="primary"
+                    )
+                    
+                    # Formulaire d'édition
+                    with st.expander("✏️ Modifier les informations de ce séjour", expanded=False):
+                        with st.form(f"edit_form_{selected_id}"):
+                            # Pré-remplissage avec gestion sécurisée des dates
+                            try: d_entree_val = datetime.strptime(str(selected_row.get("Date_Entree")), "%Y-%m-%d").date()
+                            except: d_entree_val = date.today()
+                            
+                            try: d_nais_val = datetime.strptime(str(selected_row.get("Date_Naissance")), "%Y-%m-%d").date()
+                            except: d_nais_val = date(1990,1,1)
+                            
+                            try: d_sortie_val = datetime.strptime(str(selected_row.get("Date_Sortie")), "%Y-%m-%d").date()
+                            except: d_sortie_val = date.today()
+                            
+                            # Calcul nuits basé sur l'actuel
+                            delta = (d_sortie_val - d_entree_val).days
+                            nuits_val = max(1, delta)
+                            
+                            c1, c2, c3 = st.columns(3)
+                            with c1:
+                                e_nom = st.text_input("Nom Client", value=str(selected_row.get("Client_Nom", "")))
+                                e_dnais = st.date_input("Date Naissance", value=d_nais_val, min_value=date(1920,1,1))
+                                e_tel = st.text_input("Téléphone Complet", value=str(selected_row.get("Tel_Client", "")))
+                                e_prov = st.text_input("Provenance", value=str(selected_row.get("Provenance", "")))
+                            with c2:
+                                piece_type_actuel = selected_row.get("Piece_Type", "CNI")
+                                piece_options = ["CNI", "Passeport", "Permis", "Carte Séjour"]
+                                e_piece = st.selectbox("Type Pièce", piece_options, index=piece_options.index(piece_type_actuel) if piece_type_actuel in piece_options else 0)
+                                e_pnum = st.text_input("N° Pièce", value=str(selected_row.get("Piece_Num", "")))
+                                e_dent = st.date_input("Date d'Entrée", value=d_entree_val)
+                                e_nuits = st.number_input("Nombre de Nuits", min_value=1, step=1, value=nuits_val)
+                            with c3:
+                                app_list = CONFIG["APPARTEMENTS"]
+                                cur_app = str(selected_row.get("Appartement", app_list[0]))
+                                e_app = st.selectbox("Appartement", app_list, index=app_list.index(cur_app) if cur_app in app_list else 0)
+                                # On autorise la modification du montant total, utile si erreur
+                                m_tot_val = float(selected_row.get("Montant_Total", e_nuits * CONFIG["PRIX_NUITEE"]) or (e_nuits * CONFIG["PRIX_NUITEE"]))
+                                e_montant = st.number_input("Montant Total (F CFA)", value=int(m_tot_val), step=1000)
+                                val_paiement = str(selected_row.get("Paiement", "Non Payé")).lower()
+                                e_paiement = st.selectbox("Statut Paiement", ["Non Payé", "Payé"], index=1 if val_paiement == "payé" or val_paiement == "paye" else 0)
+                                e_statut = st.selectbox("Statut Séjour", ["En cours", "Terminé"], index=1 if str(selected_row.get("Statut", "En cours")).lower() == "terminé" else 0)
+
+                            st.write("---")
+                            c_act1, c_act2 = st.columns(2)
+                            with c_act1:
+                                e_enom = st.text_input("Employé de Garde", value=str(selected_row.get("Employe_Nom", "")))
+                                e_rais = st.text_area("Raison du séjour", value=str(selected_row.get("Raison", "")))
+                            with c_act2:
+                                e_dnom = st.text_input("Nom Démarcheur", value=str(selected_row.get("Demarcheur_Nom", "")))
+                                e_comm = st.number_input("Commission (F CFA)", value=int(float(selected_row.get("Commission", 0) or 0)))
+
+                            submit_edit = st.form_submit_button("SAUVEGARDER LES MODIFICATIONS 💾")
+                            
+                            if submit_edit:
+                                dsor_edit = e_dent + timedelta(days=e_nuits)
+                                updated_data = {
+                                    "Client_Nom": e_nom, "Date_Naissance": str(e_dnais), "Provenance": e_prov,
+                                    "Piece_Type": e_piece, "Piece_Num": e_pnum, "Tel_Client": e_tel, 
+                                    "Date_Entree": str(e_dent), "Date_Sortie": str(dsor_edit), "Raison": e_rais, 
+                                    "Appartement": e_app, "Employe_Nom": e_enom, 
+                                    "Demarcheur_Nom": e_dnom, "Montant_Total": e_montant, 
+                                    "Commission": e_comm, "Statut": e_statut, "Paiement": e_paiement
+                                }
+                                
+                                res = st.session_state.api_session.patch(
+                                    f"{CONFIG['API_URL']}/id/{selected_id}?sheet=sejours",
+                                    json={"data": updated_data}
+                                )
+                                
+                                if res.status_code in [200, 201, 204] or "updated" in res.text.lower():
+                                    st.success("✅ Modifications enregistrées avec succès !")
+                                    st.cache_data.clear()
+                                    import time as time_mod
+                                    time_mod.sleep(1.5)
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Erreur lors de la mise à jour.")
+
+    # --- 4. DEPENSES & MAINTENANCE ---
     elif st.session_state.page_active == "🛠️ Dépenses & Maintenance":
         st.header("Gestion Logistique")
         tab1, tab2 = st.tabs(["💸 Trésorerie (Sortie)", "🛠️ Suivi Maintenance"])
