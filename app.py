@@ -352,8 +352,19 @@ def generer_recu_pdf(info: dict, appart: str) -> bytes:
     pdf.set_font("Arial", "I", 10)
     pdf.set_text_color(127, 140, 141)
     pdf.cell(0, 10, clean_txt("Merci de votre confiance. Contactez-nous pour toute assistance."), ln=True, align="C")
-    pdf.cell(0, 5, clean_txt("La Direction PARADISO."), ln=True, align="C")
     
+    # Signature
+    pdf.ln(5)
+    y_sig = pdf.get_y()
+    pdf.cell(0, 5, clean_txt("La Direction PARADISO."), ln=True, align="R")
+    
+    # Ajout de l'image de signature si elle existe
+    import os
+    if os.path.exists("signature.png"):
+        pdf.image("signature.png", x=150, y=y_sig + 5, w=40)
+    elif os.path.exists("signature.jpg"):
+        pdf.image("signature.jpg", x=150, y=y_sig + 5, w=40)
+        
     return pdf.output(dest="S").encode('latin-1', 'replace')
 
 import extra_streamlit_components as stx
