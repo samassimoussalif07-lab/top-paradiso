@@ -163,7 +163,7 @@ def obtenir_etats() -> tuple[dict, dict]:
     return bloques, occupes
 
 # --- GÉNÉRATEUR PDF ROBUSTE (Latin-1) ---
-def imprimer_bilan(mois_code: str, ca: float, comm: float, dep: float, net: float, df_dep: pd.DataFrame) -> bytes:
+def imprimer_bilan(mois_code: str, ca: float, ca_paye: float, ca_attente: float, comm: float, dep: float, net: float, df_dep: pd.DataFrame, df_s_mois: pd.DataFrame) -> bytes:
     m_num, annee = mois_code.split("-")
     nom_mois = MOIS_FR.get(m_num, "INCONNU")
     titre_bilan = f"BILAN MENSUEL - {nom_mois} {annee}"
@@ -202,32 +202,64 @@ def imprimer_bilan(mois_code: str, ca: float, comm: float, dep: float, net: floa
     # Largeurs colonnes
     w1, w2 = 95, 95
     
-    # Ligne 1 : CA
-    pdf.cell(w1, 10, clean_txt("CHIFFRE D'AFFAIRES BRUT"), border=1, align="L", fill=True)
+    pdf.cell(w1, 10, clean_txt("CHIFFRE D'AFFAIRES (CA) GLOBAL"), border=1, align="L", fill=True)
     pdf.set_font("Arial", "", 11)
     pdf.cell(w2, 10, clean_txt(f"{int(ca):,} F CFA".replace(',', ' ')), border=1, align="R", ln=True)
     
-    # Ligne 2 : Commissions
+    pdf.set_font("Arial", "I", 10)
+    pdf.cell(w1, 8, clean_txt("   Dont CA Encaissé (Payé)"), border="LR", align="L")
+    pdf.cell(w2, 8, clean_txt(f"{int(ca_paye):,} F CFA".replace(',', ' ')), border="LR", align="R", ln=True)
+    pdf.cell(w1, 8, clean_txt("   Dont CA En Attente (Non Payé)"), border="LRB", align="L")
+    pdf.cell(w2, 8, clean_txt(f"{int(ca_attente):,} F CFA".replace(',', ' ')), border="LRB", align="R", ln=True)
+    
+    # Ligne Commissions
     pdf.set_font("Arial", "B", 11)
     pdf.cell(w1, 10, clean_txt("TOTAL COMMISSIONS"), border=1, align="L", fill=True)
     pdf.set_font("Arial", "", 11)
     pdf.cell(w2, 10, clean_txt(f"{int(comm):,} F CFA".replace(',', ' ')), border=1, align="R", ln=True)
     
-    # Ligne 3 : Dépenses
+    # Ligne Dépenses
     pdf.set_font("Arial", "B", 11)
     pdf.cell(w1, 10, clean_txt("TOTAL DÉPENSES"), border=1, align="L", fill=True)
     pdf.set_font("Arial", "", 11)
     pdf.cell(w2, 10, clean_txt(f"{int(dep):,} F CFA".replace(',', ' ')), border=1, align="R", ln=True)
     
-    # Ligne 4 : NET
+    # Ligne NET
     pdf.set_font("Arial", "B", 12)
     pdf.set_text_color(39, 174, 96) # Vert pour le bénéfice
     pdf.cell(w1, 10, clean_txt("BÉNÉFICE NET RESTANT"), border=1, align="L", fill=True)
     pdf.cell(w2, 10, clean_txt(f"{int(net):,} F CFA".replace(',', ' ')), border=1, align="R", ln=True)
     
     pdf.set_text_color(0, 0, 0)
-    pdf.ln(15)
+    pdf.ln(10)
     
+    # Détail des revenus (Séjours du mois)
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(0, 10, clean_txt("DÉTAIL DES REVENUS DU MOIS (PRORATA) :"), ln=True)
+    
+    if not df_s_mois.empty:
+        pdf.set_font("Arial", "B", 9)
+        pdf.set_fill_color(236, 240, 241)
+        ws1, ws2, ws3, ws4, ws5 = 45, 25, 65, 20, 35
+        pdf.cell(ws1, 8, clean_txt("Client"), border=1, align="C", fill=True)
+        pdf.cell(ws2, 8, clean_txt("Appart."), border=1, align="C", fill=True)
+        pdf.cell(ws3, 8, clean_txt("Période globale"), border=1, align="C", fill=True)
+        pdf.cell(ws4, 8, clean_txt("Nuits"), border=1, align="C", fill=True)
+        pdf.cell(ws5, 8, clean_txt("Montant (Mois)"), border=1, align="C", fill=True, ln=True)
+        
+        pdf.set_font("Arial", "", 9)
+        for _, r in df_s_mois.iterrows():
+            pdf.cell(ws1, 8, clean_txt(str(r.get('Client',''))[:25]), border=1, align="L")
+            pdf.cell(ws2, 8, clean_txt(str(r.get('Appart',''))), border=1, align="C")
+            pdf.cell(ws3, 8, clean_txt(str(r.get('Dates',''))), border=1, align="C")
+            pdf.cell(ws4, 8, clean_txt(str(r.get('Nuits',''))), border=1, align="C")
+            pdf.cell(ws5, 8, clean_txt(f"{int(r.get('Montant',0)):,} F".replace(',', ' ')), border=1, align="R", ln=True)
+    else:
+        pdf.set_font("Arial", "I", 10)
+        pdf.cell(0, 10, clean_txt("Aucun revenu enregistré sur ce mois."), ln=True)
+        
+    pdf.ln(5)
+
     # Détail des dépenses (Tableau)
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 10, clean_txt("DÉTAIL DES DÉPENSES :"), ln=True)
@@ -815,36 +847,141 @@ else:
             df_s = charger("sejours")
             df_d = charger("depenses")
             
+            # Fonction pour générer la liste des mois (dynamique)
+            mois_set = set()
+            if not df_d.empty and "Mois" in df_d.columns:
+                mois_set.update(df_d["Mois"].dropna().unique())
+            
             if not df_s.empty:
-                mois_list = sorted(df_s["Mois"].dropna().unique(), reverse=True)
+                for _, row in df_s.iterrows():
+                    try:
+                        d_ent = datetime.strptime(str(row["Date_Entree"]), "%Y-%m-%d").date()
+                        d_sor = datetime.strptime(str(row["Date_Sortie"]), "%Y-%m-%d").date()
+                        
+                        # Règle du lendemain : une nuit = le jour du checkout
+                        curr = d_ent + timedelta(days=1)
+                        if curr > d_sor: curr = d_sor # Cas day-use (entrée = sortie)
+                        
+                        while curr <= d_sor:
+                            mois_set.add(curr.strftime("%m-%Y"))
+                            curr += timedelta(days=1)
+                    except:
+                        if pd.notna(row.get("Mois")):
+                            mois_set.add(str(row.get("Mois")))
+            
+            mois_list = sorted(list(mois_set), key=lambda x: datetime.strptime(x, "%m-%Y") if x and len(x.split('-'))==2 else datetime.min, reverse=True)
+            
+            if mois_list:
                 sel_m = st.selectbox("Sélectionner la période", mois_list)
                 
                 if sel_m:
-                    s_m = df_s[df_s["Mois"] == sel_m].copy()
+                    try:
+                        m_num, year = map(int, sel_m.split("-"))
+                    except:
+                        m_num, year = 1, 2000
+                    
                     d_m = df_d[df_d["Mois"] == sel_m].copy() if not df_d.empty else pd.DataFrame()
-                    
-                    ca = pd.to_numeric(s_m["Montant_Total"], errors='coerce').fillna(0).sum()
-                    com = pd.to_numeric(s_m["Commission"], errors='coerce').fillna(0).sum()
                     dep = pd.to_numeric(d_m["Montant"], errors='coerce').fillna(0).sum() if not d_m.empty else 0
-                    net = ca - com - dep
                     
-                    # Cartes de Finance (Affichage élégant avec Markdown)
+                    ca = 0
+                    ca_paye = 0
+                    ca_attente = 0
+                    comm = 0
+                    lignes_sejours_mois = []
+                    
+                    if not df_s.empty:
+                        for _, row in df_s.iterrows():
+                            try:
+                                d_ent = datetime.strptime(str(row["Date_Entree"]), "%Y-%m-%d").date()
+                                d_sor = datetime.strptime(str(row["Date_Sortie"]), "%Y-%m-%d").date()
+                                
+                                # Calcul des nuits dans CE mois
+                                nuits_ce_mois = 0
+                                curr = d_ent + timedelta(days=1)
+                                if curr > d_sor: curr = d_sor
+                                while curr <= d_sor:
+                                    if curr.month == m_num and curr.year == year:
+                                        nuits_ce_mois += 1
+                                    curr += timedelta(days=1)
+                                
+                                if nuits_ce_mois > 0:
+                                    total_nuits_sejour = max(1, (d_sor - d_ent).days)
+                                    montant_total = float(row.get("Montant_Total", 0) or 0)
+                                    commission_totale = float(row.get("Commission", 0) or 0)
+                                    
+                                    prix_par_nuit = montant_total / total_nuits_sejour
+                                    comm_par_nuit = commission_totale / total_nuits_sejour
+                                    
+                                    montant_ce_mois = prix_par_nuit * nuits_ce_mois
+                                    comm_ce_mois = comm_par_nuit * nuits_ce_mois
+                                    
+                                    ca += montant_ce_mois
+                                    comm += comm_ce_mois
+                                    
+                                    val_paiement = str(row.get("Paiement", "")).lower()
+                                    est_paye = (val_paiement == "payé" or val_paiement == "paye")
+                                    
+                                    if est_paye:
+                                        ca_paye += montant_ce_mois
+                                    else:
+                                        ca_attente += montant_ce_mois
+                                        
+                                    lignes_sejours_mois.append({
+                                        "Client": str(row.get("Client_Nom", "Inconnu")),
+                                        "Appart": str(row.get("Appartement", "?")),
+                                        "Dates": f"Du {d_ent.strftime('%d/%m')} au {d_sor.strftime('%d/%m')}",
+                                        "Nuits": f"{nuits_ce_mois}/{total_nuits_sejour}",
+                                        "Montant": montant_ce_mois
+                                    })
+                            except:
+                                # Fallback pour les anciennes données ou erreurs de date
+                                if str(row.get("Mois")) == sel_m:
+                                    m_val = float(row.get("Montant_Total", 0) or 0)
+                                    c_val = float(row.get("Commission", 0) or 0)
+                                    ca += m_val
+                                    comm += c_val
+                                    val_paiement = str(row.get("Paiement", "")).lower()
+                                    est_paye = (val_paiement == "payé" or val_paiement == "paye")
+                                    if est_paye: ca_paye += m_val
+                                    else: ca_attente += m_val
+                                    
+                                    lignes_sejours_mois.append({
+                                        "Client": str(row.get("Client_Nom", "Inconnu")),
+                                        "Appart": str(row.get("Appartement", "?")),
+                                        "Dates": "Ancien format",
+                                        "Nuits": "?",
+                                        "Montant": m_val
+                                    })
+                                    
+                    df_s_mois = pd.DataFrame(lignes_sejours_mois)
+                    net = ca - comm - dep
+                    
                     st.write("")
+                    st.markdown(f"### Résultat du mois ({sel_m})")
                     f_col1, f_col2, f_col3, f_col4 = st.columns(4)
-                    f_col1.metric("CHIFFRE D'AFFAIRES", f"{ca:,.0f} F")
-                    f_col2.metric("COMMISSIONS A REVERSER", f"{com:,.0f} F", delta_color="inverse")
+                    f_col1.metric("CA GLOBAL (PRORATA)", f"{ca:,.0f} F")
+                    f_col2.metric("DONT CA ENCAISSÉ (PAYÉ)", f"{ca_paye:,.0f} F", help="Argent déjà reçu")
                     f_col3.metric("DEPENSES", f"{dep:,.0f} F", delta_color="inverse")
                     f_col4.metric("BENEFICE NET", f"{net:,.0f} F", delta="Calculé")
 
                     st.markdown("---")
-                    st.subheader("📋 Récapitulatif des sorties (Dépenses)")
-                    if not d_m.empty: 
-                        st.dataframe(d_m[["Date", "Motif", "Appartement", "Montant"]], use_container_width=True, hide_index=True)
-                    else:
-                        st.info("Aucune dépense enregistrée sur cette période.")
+                    col_t1, col_t2 = st.columns(2)
+                    with col_t1:
+                        st.subheader("📋 Séjours impactant ce mois")
+                        if not df_s_mois.empty:
+                            st.dataframe(df_s_mois, use_container_width=True, hide_index=True)
+                        else:
+                            st.info("Aucun séjour sur cette période.")
+                    
+                    with col_t2:
+                        st.subheader("📉 Dépenses du mois")
+                        if not d_m.empty: 
+                            st.dataframe(d_m[["Date", "Motif", "Appartement", "Montant"]], use_container_width=True, hide_index=True)
+                        else:
+                            st.info("Aucune dépense enregistrée sur cette période.")
                         
                     st.markdown("---")
-                    pdf_bytes = imprimer_bilan(sel_m, ca, com, dep, net, d_m)
+                    pdf_bytes = imprimer_bilan(sel_m, ca, ca_paye, ca_attente, comm, dep, net, d_m, df_s_mois)
                     st.download_button(
                         label=f"📥 ÉDITER LE BILAN PDF GLOBAL - {sel_m}",
                         data=pdf_bytes,
@@ -853,6 +990,8 @@ else:
                         type="primary",
                         use_container_width=True
                     )
+            else:
+                st.info("Aucune donnée disponible pour le moment.")
 
     # --- 6. MESSAGERIE INTERNE (CHAT) ---
     elif st.session_state.page_active == "💬 Messagerie Interne":
