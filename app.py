@@ -48,19 +48,48 @@ st.markdown("""
 
     div.card {
         padding: 20px;
-        border-radius: 12px;
+        border-radius: 16px;
         color: white;
         text-align: center;
-        margin-bottom: 10px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        margin-bottom: 15px;
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        border: 1px solid rgba(255, 255, 255, 0.1);
     }
-    div.card-maintenance { background-color: #c0392b; } /* Rouge foncé */
-    div.card-occupe { background-color: #e67e22; }      /* Orange */
-    div.card-libre { background-color: #27ae60; }       /* Vert */
+    div.card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 12px 20px rgba(0, 0, 0, 0.2);
+    }
+    div.card-maintenance { 
+        background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); 
+    }
+    div.card-occupe { 
+        background: linear-gradient(135deg, #f39c12 0%, #d35400 100%); 
+    }
+    div.card-libre { 
+        background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%); 
+    }
     
-    div.card h3 { margin: 0 0 10px 0; color: white; }
-    div.card p { margin: 0; font-size: 16px; font-weight: 500;}
-    div.card small { opacity: 0.8; font-size: 14px;}
+    div.card h3 { 
+        margin: 0 0 10px 0; 
+        color: white; 
+        font-size: 22px; 
+        font-weight: 700;
+        text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
+    }
+    div.card p { 
+        margin: 0; 
+        font-size: 16px; 
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    div.card small { 
+        opacity: 0.9; 
+        font-size: 13px;
+        display: block;
+        margin-top: 8px;
+        line-height: 1.4;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -477,10 +506,123 @@ else:
 
     # --- 1. DASHBOARD OVERHAUL ---
     if st.session_state.page_active == "🏠 Tableau de bord":
-        st.header("État du Parc Immobilier")
-        st.markdown("Aperçu en temps réel de la disponibilité des **appartements VIP**.")
-        st.divider()
+        st.header("Cockpit de Gestion - Résidence PARADISO")
+        st.markdown("Pilotez toutes les opérations en temps réel directement depuis cette page d'accueil.")
         
+        # --- RECHERCHE GLOBALE RAPIDE ---
+        search_query = st.text_input("🔍 Recherche rapide de client (Nom, Téléphone, Appartement) :", placeholder="Rechercher un séjour en cours ou passé...")
+        if search_query:
+            df_sejours = charger("sejours")
+            if not df_sejours.empty:
+                query_lower = search_query.lower()
+                df_filtered = df_sejours[
+                    df_sejours["Client_Nom"].astype(str).str.lower().str.contains(query_lower) |
+                    df_sejours["Tel_Client"].astype(str).str.lower().str.contains(query_lower) |
+                    df_sejours["Appartement"].astype(str).str.lower().str.contains(query_lower)
+                ]
+                
+                if df_filtered.empty:
+                    st.info("Aucun séjour trouvé pour cette recherche.")
+                else:
+                    st.markdown("##### Résultats de recherche :")
+                    for _, row in df_filtered.head(5).iterrows():
+                        col_r1, col_r2, col_r3, col_r4 = st.columns([2, 1.5, 1.5, 1])
+                        client_nom = row.get("Client_Nom", "")
+                        appart_nom = row.get("Appartement", "")
+                        date_entree = row.get("Date_Entree", "")
+                        date_sortie = row.get("Date_Sortie", "")
+                        statut_sej = row.get("Statut", "")
+                        id_sej = row.get("id", "")
+                        
+                        col_r1.markdown(f"**{client_nom}** ({row.get('Tel_Client', '')})")
+                        col_r2.markdown(f"🏠 {appart_nom} | Du {date_entree} au {date_sortie}")
+                        col_r3.markdown(f"Statut: `{statut_sej}` | Paiement: `{row.get('Paiement', '')}`")
+                        
+                        if col_r4.button("✏️ Modifier", key=f"search_edit_{id_sej}", use_container_width=True):
+                            st.session_state.editing_search_id = id_sej
+                            st.session_state.selected_app = None # close app panel to focus on search edit
+                            st.rerun()
+                            
+                    # Formulaire d'édition de la recherche si activé
+                    if "editing_search_id" in st.session_state and st.session_state.editing_search_id:
+                        selected_id = st.session_state.editing_search_id
+                        selected_rows = df_sejours[df_sejours["id"] == selected_id]
+                        if not selected_rows.empty:
+                            selected_row = selected_rows.iloc[0]
+                            st.markdown(f"### ✏️ Modification du séjour de **{selected_row.get('Client_Nom')}** (ID: {selected_id})")
+                            with st.form(f"search_edit_form_{selected_id}"):
+                                try: d_entree_val = datetime.strptime(str(selected_row.get("Date_Entree")), "%Y-%m-%d").date()
+                                except: d_entree_val = date.today()
+                                try: d_nais_val = datetime.strptime(str(selected_row.get("Date_Naissance")), "%Y-%m-%d").date()
+                                except: d_nais_val = date(1990,1,1)
+                                try: d_sortie_val = datetime.strptime(str(selected_row.get("Date_Sortie")), "%Y-%m-%d").date()
+                                except: d_sortie_val = date.today()
+                                nuits_val = max(1, (d_sortie_val - d_entree_val).days)
+                                
+                                c1, c2, c3 = st.columns(3)
+                                with c1:
+                                    e_nom = st.text_input("Nom Client", value=str(selected_row.get("Client_Nom", "")))
+                                    e_dnais = st.date_input("Date Naissance", value=d_nais_val, min_value=date(1920,1,1))
+                                    e_tel = st.text_input("Téléphone Complet", value=str(selected_row.get("Tel_Client", "")))
+                                    e_prov = st.text_input("Provenance", value=str(selected_row.get("Provenance", "")))
+                                with c2:
+                                    piece_type_actuel = selected_row.get("Piece_Type", "CNI")
+                                    piece_options = ["CNI", "Passeport", "Permis", "Carte Séjour"]
+                                    e_piece = st.selectbox("Type Pièce", piece_options, index=piece_options.index(piece_type_actuel) if piece_type_actuel in piece_options else 0)
+                                    e_pnum = st.text_input("N° Pièce", value=str(selected_row.get("Piece_Num", "")))
+                                    e_dent = st.date_input("Date d'Entrée", value=d_entree_val)
+                                    e_nuits = st.number_input("Nombre de Nuits", min_value=1, step=1, value=nuits_val)
+                                with c3:
+                                    app_list = CONFIG["APPARTEMENTS"]
+                                    cur_app = str(selected_row.get("Appartement", app_list[0]))
+                                    e_app = st.selectbox("Appartement", app_list, index=app_list.index(cur_app) if cur_app in app_list else 0)
+                                    m_tot_val = float(selected_row.get("Montant_Total", e_nuits * CONFIG["PRIX_NUITEE"]) or (e_nuits * CONFIG["PRIX_NUITEE"]))
+                                    e_montant = st.number_input("Montant Total (F CFA)", value=int(m_tot_val), step=1000)
+                                    val_paiement_s = str(selected_row.get("Paiement", "Non Payé")).lower()
+                                    e_paiement = st.selectbox("Statut Paiement", ["Non Payé", "Payé"], index=1 if val_paiement_s in ["payé", "paye"] else 0)
+                                    e_statut = st.selectbox("Statut Séjour", ["En cours", "Terminé"], index=1 if str(selected_row.get("Statut", "En cours")).lower() == "terminé" else 0)
+
+                                st.write("---")
+                                c_act1, c_act2 = st.columns(2)
+                                with c_act1:
+                                    e_enom = st.text_input("Employé de Garde", value=str(selected_row.get("Employe_Nom", "")))
+                                    e_rais = st.text_area("Raison du séjour", value=str(selected_row.get("Raison", "")))
+                                with c_act2:
+                                    e_dnom = st.text_input("Nom Démarcheur", value=str(selected_row.get("Demarcheur_Nom", "")))
+                                    e_comm = st.number_input("Commission (F CFA)", value=int(float(selected_row.get("Commission", 0) or 0)))
+
+                                c_btn1, c_btn2 = st.columns(2)
+                                with c_btn1:
+                                    if st.form_submit_button("SAUVEGARDER LES MODIFICATIONS 💾", use_container_width=True):
+                                        dsor_edit = e_dent + timedelta(days=e_nuits)
+                                        updated_data = {
+                                            "Client_Nom": e_nom, "Date_Naissance": str(e_dnais), "Provenance": e_prov,
+                                            "Piece_Type": e_piece, "Piece_Num": e_pnum, "Tel_Client": e_tel, 
+                                            "Date_Entree": str(e_dent), "Date_Sortie": str(dsor_edit), "Raison": e_rais, 
+                                            "Appartement": e_app, "Employe_Nom": e_enom, 
+                                            "Demarcheur_Nom": e_dnom, "Montant_Total": e_montant, 
+                                            "Commission": e_comm, "Statut": e_statut, "Paiement": e_paiement
+                                        }
+                                        res = st.session_state.api_session.patch(
+                                            f"{CONFIG['API_URL']}/id/{selected_id}?sheet=sejours",
+                                            json={"data": updated_data}
+                                        )
+                                        if res.status_code in [200, 201, 204] or "updated" in res.text.lower():
+                                            st.success("✅ Modifications enregistrées !")
+                                            st.session_state.editing_search_id = None
+                                            st.cache_data.clear()
+                                            import time as time_mod
+                                            time_mod.sleep(1.5)
+                                            st.rerun()
+                                        else:
+                                            st.error("Erreur lors de la mise à jour.")
+                                with c_btn2:
+                                    if st.form_submit_button("Annuler", use_container_width=True):
+                                        st.session_state.editing_search_id = None
+                                        st.rerun()
+            st.divider()
+
+        # --- CARTES D'ÉTAT DES APPARTEMENTS ---
         cols = st.columns(4)
         for i, app in enumerate(CONFIG["APPARTEMENTS"]):
             with cols[i]:
@@ -492,60 +634,283 @@ else:
                 elif app in occupes:
                     info = occupes[app]
                     etat_paiement = str(info.get("paiement", "Non Payé")).strip()
-                    # Vérification ultra-robuste pour s'assurer que ça capture "Payé" ou "paye" même avec des espaces invisibles
                     est_paye = (etat_paiement == "Payé" or etat_paiement.lower() == "payé" or etat_paiement.lower() == "paye")
-                    
-                    # On le reformate pour être sûr qu'il est propre et joli
                     affichage_paiement = "Payé" if est_paye else "Non Payé"
                     color_paiement = "#2ecc71" if est_paye else "#e74c3c"
                     
                     html_card = f"""<div class='card card-occupe'>
                                     <h3>{app}</h3><p>🔴 OCCUPÉ</p>
                                     <small>Libre le :<br>{info['fin']}</small>
-                                    <br><span style='background-color:{color_paiement}; color:white; padding: 2px 6px; border-radius:4px; font-size:12px;'>Paiement : {affichage_paiement}</span>
+                                    <br><span style='background-color:{color_paiement}; color:white; padding: 2px 6px; border-radius:4px; font-size:12px; font-weight:bold;'>Paiement : {affichage_paiement}</span>
                                     </div>"""
                     st.markdown(html_card, unsafe_allow_html=True)
-                    
-                    if not est_paye:
-                        if st.button("Valider Paiement 💸", key=f"pay_{app}", use_container_width=True):
-                            res = st.session_state.api_session.patch(
-                                f"{CONFIG['API_URL']}/id/{info['id_sej']}?sheet=sejours",
-                                json={"data": {"Paiement": "Payé"}}
-                            )
-                            # Vérification stricte si l'API a bien trouvé la colonne
-                            if res.status_code in [200, 201, 204] or "updated" in res.text.lower():
-                                st.success("✅ Paiement bien validé ! Mise à jour en cours...")
-                                st.cache_data.clear()
-                                import time as time_mod
-                                time_mod.sleep(2) # Attente légèrement rallongée
-                                st.rerun()
-                            else:
-                                st.error("❌ Erreur Critique API : La colonne 'Paiement' n'existe pas encore dans votre Google Sheet (onglet 'sejours') ! Veuillez d'abord la créer tout à droite.")
-                    
-                    pdf_bytes = generer_recu_pdf(info, app)
-                    st.download_button("🖨️ Télécharger Reçu", data=pdf_bytes, file_name=f"Recu_{app}.pdf", mime="application/pdf", key=f"dl_{app}", use_container_width=True)
-                    
-                    msg = f"Bonjour {info['client']}, voici le récapitulatif de votre séjour à {app}. Montant total: {int(info['montant']):,} F CFA. Statut du paiement: {etat_paiement}."
-                    url_msg = urllib.parse.quote(msg)
-                    st.markdown(f"<a href='https://wa.me/{info['tel'].replace('+', '')}?text={url_msg}' target='_blank' style='display:block; text-align:center; background-color:#25D366; color:white; padding:8px; border-radius:4px; text-decoration:none; margin-bottom:5px; font-size:14px;'>📱 Envoyer Reçu (WhatsApp)</a>", unsafe_allow_html=True)
-
-                    if st.button("Mettre fin au séjour", key=f"fin_{app}", use_container_width=True):
-                        st.session_state.api_session.patch(
-                            f"{CONFIG['API_URL']}/id/{info['id_sej']}?sheet=sejours",
-                            json={"data": {"Statut": "Terminé", "Date_Sortie": str(datetime.now(CONFIG["TZ_BF"]).date())}}
-                        )
-                        st.toast(f"Séjour de {app} terminé. Actualisation...", icon="✅")
-                        st.cache_data.clear()
-                        import time as time_mod
-                        time_mod.sleep(2)
-                        st.rerun()
                 else:
                     html_card = f"""<div class='card card-libre'>
                                     <h3>{app}</h3><p>🟢 LIBRE</p></div>"""
                     st.markdown(html_card, unsafe_allow_html=True)
-                    if st.button(f"Enregistrer Client", key=f"btn_{app}", use_container_width=True):
-                        st.session_state.appart_cible = app
-                        st.session_state.page_active = "📝 Enregistrement Client"
+                
+                # Sélection de l'appartement pour actions rapides
+                is_selected = ("selected_app" in st.session_state and st.session_state.selected_app == app)
+                btn_label = f"⚙️ Gérer {app}" if not is_selected else f"⭐️ Activé ({app})"
+                if st.button(btn_label, key=f"select_{app}", use_container_width=True, type="secondary" if not is_selected else "primary"):
+                    st.session_state.selected_app = app
+                    st.session_state.editing_search_id = None
+                    st.rerun()
+                    
+        # Initialiser l'appartement sélectionné par défaut si aucun n'est actif
+        if "selected_app" not in st.session_state or st.session_state.selected_app is None:
+            st.session_state.selected_app = CONFIG["APPARTEMENTS"][0]
+            
+        selected_app = st.session_state.selected_app
+        st.write("")
+        st.markdown(f"### ⚙️ Cockpit de Contrôle : **{selected_app}**")
+        
+        # --- PANNEAU CONTEXTUEL ---
+        if selected_app in bloques:
+            st.warning(f"Cet appartement est actuellement bloqué pour maintenance. Motif : **{bloques[selected_app]}**")
+            c_m1, c_m2 = st.columns(2)
+            with c_m1:
+                if st.button("🟢 Rendre disponible (Terminer la maintenance)", key=f"m_dispo_{selected_app}", use_container_width=True, type="primary"):
+                    res = st.session_state.api_session.patch(
+                        f"{CONFIG['API_URL']}/Appartement/{selected_app}?sheet=maintenance", 
+                        json={"data": {"Statut": "Disponible (Fin de maintenance)", "Raison": ""}}
+                    )
+                    if res.status_code not in [200, 204]:
+                        sauver({"Appartement": selected_app, "Statut": "Disponible (Fin de maintenance)", "Raison": ""}, "maintenance")
+                    st.success(f"L'appartement {selected_app} est à nouveau disponible.")
+                    st.cache_data.clear()
+                    import time as time_mod
+                    time_mod.sleep(1.5)
+                    st.rerun()
+            with c_m2:
+                new_reason = st.text_input("Modifier le motif de maintenance :", value=bloques[selected_app], key=f"m_reason_{selected_app}")
+                if st.button("Sauvegarder le nouveau motif", key=f"m_save_reason_{selected_app}", use_container_width=True):
+                    res = st.session_state.api_session.patch(
+                        f"{CONFIG['API_URL']}/Appartement/{selected_app}?sheet=maintenance", 
+                        json={"data": {"Statut": "Inaccessible", "Raison": new_reason}}
+                    )
+                    if res.status_code not in [200, 204]:
+                        sauver({"Appartement": selected_app, "Statut": "Inaccessible", "Raison": new_reason}, "maintenance")
+                    st.success("Motif de maintenance mis à jour.")
+                    st.cache_data.clear()
+                    import time as time_mod
+                    time_mod.sleep(1.5)
+                    st.rerun()
+                    
+        elif selected_app in occupes:
+            info = occupes[selected_app]
+            etat_paiement = str(info.get("paiement", "Non Payé")).strip()
+            est_paye = (etat_paiement == "Payé" or etat_paiement.lower() == "payé" or etat_paiement.lower() == "paye")
+            
+            c_info, c_actions = st.columns([1.5, 1])
+            with c_info:
+                st.markdown(f"""
+                📍 **Résumé du séjour en cours :**
+                - **Client :** `{info['client']}`
+                - **Téléphone :** `{info['tel']}`
+                - **Date d'Entrée :** `{info['debut']}`
+                - **Libération prévue :** `{info['fin']}`
+                - **Montant Total :** `{int(info['montant']):,} F CFA`
+                - **Statut du Paiement :** {'🟢 Payé' if est_paye else '🔴 Non Payé'}
+                """)
+                
+                if st.checkbox("✏️ Modifier les détails de ce séjour", key=f"chk_edit_{selected_app}"):
+                    df_sejours = charger("sejours")
+                    if not df_sejours.empty:
+                        selected_rows = df_sejours[df_sejours["id"] == info["id_sej"]]
+                        if not selected_rows.empty:
+                            selected_row = selected_rows.iloc[0]
+                            with st.form(f"inline_edit_form_{selected_app}"):
+                                try: d_entree_val = datetime.strptime(str(selected_row.get("Date_Entree")), "%Y-%m-%d").date()
+                                except: d_entree_val = date.today()
+                                try: d_nais_val = datetime.strptime(str(selected_row.get("Date_Naissance")), "%Y-%m-%d").date()
+                                except: d_nais_val = date(1990,1,1)
+                                try: d_sortie_val = datetime.strptime(str(selected_row.get("Date_Sortie")), "%Y-%m-%d").date()
+                                except: d_sortie_val = date.today()
+                                nuits_val = max(1, (d_sortie_val - d_entree_val).days)
+                                
+                                ec1, ec2 = st.columns(2)
+                                with ec1:
+                                    e_nom = st.text_input("Nom Client", value=str(selected_row.get("Client_Nom", "")))
+                                    e_dnais = st.date_input("Date Naissance", value=d_nais_val)
+                                    e_tel = st.text_input("Téléphone Complet", value=str(selected_row.get("Tel_Client", "")))
+                                    e_prov = st.text_input("Provenance", value=str(selected_row.get("Provenance", "")))
+                                    piece_type_actuel = selected_row.get("Piece_Type", "CNI")
+                                    piece_options = ["CNI", "Passeport", "Permis", "Carte Séjour"]
+                                    e_piece = st.selectbox("Type Pièce", piece_options, index=piece_options.index(piece_type_actuel) if piece_type_actuel in piece_options else 0)
+                                with ec2:
+                                    e_pnum = st.text_input("N° Pièce", value=str(selected_row.get("Piece_Num", "")))
+                                    e_dent = st.date_input("Date d'Entrée", value=d_entree_val)
+                                    e_nuits = st.number_input("Nombre de Nuits", min_value=1, step=1, value=nuits_val)
+                                    m_tot_val = float(selected_row.get("Montant_Total", e_nuits * CONFIG["PRIX_NUITEE"]) or (e_nuits * CONFIG["PRIX_NUITEE"]))
+                                    e_montant = st.number_input("Montant Total", value=int(m_tot_val), step=1000)
+                                    val_paiement_i = str(selected_row.get("Paiement", "Non Payé")).lower()
+                                    e_paiement = st.selectbox("Statut Paiement", ["Non Payé", "Payé"], index=1 if val_paiement_i in ["payé", "paye"] else 0)
+                                
+                                st.write("---")
+                                ec_act1, ec_act2 = st.columns(2)
+                                with ec_act1:
+                                    e_enom = st.text_input("Employé de Garde", value=str(selected_row.get("Employe_Nom", "")))
+                                    e_rais = st.text_area("Raison", value=str(selected_row.get("Raison", "")))
+                                with ec_act2:
+                                    e_dnom = st.text_input("Nom Démarcheur", value=str(selected_row.get("Demarcheur_Nom", "")))
+                                    e_comm = st.number_input("Commission (F CFA)", value=int(float(selected_row.get("Commission", 0) or 0)))
+
+                                if st.form_submit_button("SAUVEGARDER LES MODIFICATIONS 💾", use_container_width=True):
+                                    dsor_edit = e_dent + timedelta(days=e_nuits)
+                                    updated_data = {
+                                        "Client_Nom": e_nom, "Date_Naissance": str(e_dnais), "Provenance": e_prov,
+                                        "Piece_Type": e_piece, "Piece_Num": e_pnum, "Tel_Client": e_tel, 
+                                        "Date_Entree": str(e_dent), "Date_Sortie": str(dsor_edit), "Raison": e_rais, 
+                                        "Appartement": selected_app, "Employe_Nom": e_enom, 
+                                        "Demarcheur_Nom": e_dnom, "Montant_Total": e_montant, 
+                                        "Commission": e_comm, "Paiement": e_paiement
+                                    }
+                                    res = st.session_state.api_session.patch(
+                                        f"{CONFIG['API_URL']}/id/{info['id_sej']}?sheet=sejours",
+                                        json={"data": updated_data}
+                                    )
+                                    if res.status_code in [200, 201, 204] or "updated" in res.text.lower():
+                                        st.success("✅ Modifications enregistrées !")
+                                        st.cache_data.clear()
+                                        import time as time_mod
+                                        time_mod.sleep(1.5)
+                                        st.rerun()
+                                    else:
+                                        st.error("Erreur lors de la mise à jour.")
+            
+            with c_actions:
+                st.markdown("**Actions :**")
+                if not est_paye:
+                    if st.button("Valider Paiement 💸", key=f"pay_dash_{selected_app}", use_container_width=True, type="primary"):
+                        res = st.session_state.api_session.patch(
+                            f"{CONFIG['API_URL']}/id/{info['id_sej']}?sheet=sejours",
+                            json={"data": {"Paiement": "Payé"}}
+                        )
+                        if res.status_code in [200, 201, 204] or "updated" in res.text.lower():
+                            st.success("✅ Paiement validé !")
+                            st.cache_data.clear()
+                            import time as time_mod
+                            time_mod.sleep(1.5)
+                            st.rerun()
+                        else:
+                            st.error("Erreur API lors de la validation du paiement.")
+                
+                pdf_bytes = generer_recu_pdf(info, selected_app)
+                st.download_button("🖨️ Télécharger Reçu PDF", data=pdf_bytes, file_name=f"Recu_{selected_app}.pdf", mime="application/pdf", key=f"dl_dash_{selected_app}", use_container_width=True)
+                
+                msg = f"Bonjour {info['client']}, voici le récapitulatif de votre séjour à {selected_app}. Montant total: {int(info['montant']):,} F CFA. Statut du paiement: {etat_paiement}."
+                url_msg = urllib.parse.quote(msg)
+                st.markdown(f"<a href='https://wa.me/{info['tel'].replace('+', '')}?text={url_msg}' target='_blank' style='display:block; text-align:center; background-color:#25D366; color:white; padding:8px; border-radius:4px; text-decoration:none; margin-bottom:10px; font-size:14px; font-weight:bold;'>📱 Envoyer Reçu (WhatsApp)</a>", unsafe_allow_html=True)
+                
+                with st.popover("💸 Déclarer une Dépense", use_container_width=True):
+                    with st.form(f"dep_form_{selected_app}", clear_on_submit=True):
+                        motif_dep = st.text_input("Motif *", placeholder="Ex: Climatisation / Plomberie")
+                        montant_dep = st.number_input("Montant (F CFA) *", min_value=100, step=100)
+                        if st.form_submit_button("Valider la dépense"):
+                            if motif_dep and montant_dep:
+                                nouvel_id = f"DEP-{uuid.uuid4().hex[:5].upper()}"
+                                d_obj = {
+                                    "id": nouvel_id, 
+                                    "Date": str(date.today()), 
+                                    "Motif": motif_dep, 
+                                    "Montant": montant_dep, 
+                                    "Appartement": selected_app, 
+                                    "Mois": datetime.now(CONFIG["TZ_BF"]).strftime("%m-%Y")
+                                }
+                                if sauver(d_obj, "depenses"):
+                                    st.success("Dépense enregistrée !")
+                                    st.cache_data.clear()
+                                    import time as time_mod
+                                    time_mod.sleep(1)
+                                    st.rerun()
+                            else:
+                                st.warning("Veuillez remplir tous les champs.")
+
+                if st.button("🏁 Mettre fin au séjour", key=f"fin_dash_{selected_app}", use_container_width=True, type="secondary"):
+                    st.session_state.api_session.patch(
+                        f"{CONFIG['API_URL']}/id/{info['id_sej']}?sheet=sejours",
+                        json={"data": {"Statut": "Terminé", "Date_Sortie": str(datetime.now(CONFIG["TZ_BF"]).date())}}
+                    )
+                    st.success(f"Séjour terminé pour {selected_app}.")
+                    st.cache_data.clear()
+                    import time as time_mod
+                    time_mod.sleep(1.5)
+                    st.rerun()
+                    
+        else:
+            st.success(f"L'appartement **{selected_app}** est libre.")
+            c_reg, c_maint = st.columns([2, 1])
+            with c_reg:
+                st.markdown("##### 📝 Enregistrer un Client :")
+                with st.form(f"register_form_{selected_app}", clear_on_submit=True):
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        nom = st.text_input("Nom Client *", placeholder="Jean Dupont")
+                        dnais = st.date_input("Date de Naissance", value=date(1990,1,1), min_value=date(1920,1,1))
+                        prov = st.text_input("Provenance (Pays/Ville)")
+                        col_ind, col_tel = st.columns([1, 2])
+                        with col_ind:
+                            indicatif = st.text_input("Indicatif", value="+226")
+                        with col_tel:
+                            tel = st.text_input("Téléphone *", placeholder="70 00 00 00")
+                        piece = st.selectbox("Type Pièce", ["CNI", "Passeport", "Permis", "Carte Séjour"])
+                        pnum = st.text_input("N° Pièce *")
+                    with c2:
+                        dent = st.date_input("Date d'Entrée", value=date.today())
+                        nuits = st.number_input("Nombre de Nuits *", min_value=1, step=1)
+                        statut_paiement = st.selectbox("Statut Paiement", ["Non Payé", "Payé"])
+                        rais_s = st.text_area("Raison du séjour", height=60)
+                        enom = st.text_input("Employé Responsable")
+                        etel = st.text_input("Téléphone de l'Employé")
+                    
+                    st.markdown("---")
+                    c_com1, c_com2 = st.columns(2)
+                    with c_com1:
+                        dnom = st.text_input("Nom du Démarcheur (Optionnel)")
+                    with c_com2:
+                        dtel = st.text_input("Téléphone du Démarcheur")
+                        
+                    if st.form_submit_button("VALIDER L'ENREGISTREMENT ✅", use_container_width=True):
+                        if not nom or not tel or not pnum:
+                            st.warning("Veuillez remplir les champs obligatoires (*)")
+                        else:
+                            dsor = dent + timedelta(days=nuits)
+                            total = nuits * CONFIG["PRIX_NUITEE"]
+                            comm = (total * 0.1) if dnom else 0
+                            nouvel_id = f"VIP-{uuid.uuid4().hex[:6].upper()}"
+                            tel_complet = f"{indicatif}{tel}".replace(" ", "")
+                            data = {
+                                "id": nouvel_id, "Client_Nom": nom, "Date_Naissance": str(dnais), "Provenance": prov,
+                                "Piece_Type": piece, "Piece_Num": pnum, "Tel_Client": tel_complet, "Date_Entree": str(dent), 
+                                "Date_Sortie": str(dsor), "Raison": rais_s, "Appartement": selected_app, "Employe_Nom": enom, 
+                                "Employe_Tel": etel, "Demarcheur_Nom": "Aucun" if not dnom else dnom, 
+                                "Demarcheur_Tel": "Aucun" if not dtel else dtel, "Montant_Total": total, 
+                                "Commission": comm, "Mois": dent.strftime("%m-%Y"), "Statut": "En cours",
+                                "Paiement": statut_paiement
+                            }
+                            if sauver(data, "sejours"): 
+                                st.success("Enregistrement réussi !")
+                                st.cache_data.clear()
+                                import time as time_mod
+                                time_mod.sleep(1.5)
+                                st.rerun()
+                                
+            with c_maint:
+                st.markdown("##### 🔧 Mettre en Maintenance :")
+                with st.form(f"maint_form_{selected_app}"):
+                    rais_m = st.text_area("Observations / Motifs de blocage", height=120, placeholder="Ex: Panne climatisation...")
+                    if st.form_submit_button("Bloquer pour Maintenance 🛠️", use_container_width=True):
+                        res = st.session_state.api_session.patch(
+                            f"{CONFIG['API_URL']}/Appartement/{selected_app}?sheet=maintenance", 
+                            json={"data": {"Statut": "Inaccessible", "Raison": rais_m}}
+                        )
+                        if res.status_code not in [200, 204]:
+                            sauver({"Appartement": selected_app, "Statut": "Inaccessible", "Raison": rais_m}, "maintenance")
+                        st.success(f"{selected_app} bloqué pour maintenance.")
+                        st.cache_data.clear()
+                        import time as time_mod
+                        time_mod.sleep(1.5)
                         st.rerun()
 
     # --- 2. ENREGISTREMENT CLIENT ---
@@ -963,7 +1328,7 @@ else:
                     f_col2.metric("DONT CA ENCAISSÉ (PAYÉ)", f"{ca_paye:,.0f} F", help="Argent déjà reçu")
                     f_col3.metric("DEPENSES", f"{dep:,.0f} F", delta_color="inverse")
                     f_col4.metric("BENEFICE NET", f"{net:,.0f} F", delta="Calculé")
-
+ 
                     st.markdown("---")
                     col_t1, col_t2 = st.columns(2)
                     with col_t1:
