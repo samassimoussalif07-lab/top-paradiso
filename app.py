@@ -298,7 +298,7 @@ def imprimer_bilan(mois_code: str, ca: float, ca_paye: float, ca_attente: float,
         pdf.cell(ws2, 8, clean_txt("Appart."), border=1, align="C", fill=True)
         pdf.cell(ws3, 8, clean_txt("Période globale"), border=1, align="C", fill=True)
         pdf.cell(ws4, 8, clean_txt("Nuits"), border=1, align="C", fill=True)
-        pdf.cell(ws5, 8, clean_txt(f"{int(r.get('Montant',0)):,} F".replace(',', ' ')), border=1, align="C", fill=True, ln=True)
+        pdf.cell(ws5, 8, clean_txt("Montant (Mois)"), border=1, align="C", fill=True, ln=True)
         
         pdf.set_font("Arial", "", 9)
         for _, r in df_s_mois.iterrows():
@@ -459,12 +459,18 @@ cookie_manager = stx.CookieManager(key="cookie_manager")
 # --- AUTHENTIFICATION & NAVIGATION ---
 if 'auth' not in st.session_state: 
     st.session_state.auth, st.session_state.role = False, None
+if 'user_name' not in st.session_state:
+    st.session_state.user_name = ""
 
 # Try to auto-login via cookie
 cookie_role = cookie_manager.get(cookie="auth_role")
 if not st.session_state.auth and cookie_role in ["admin", "employe"]:
     st.session_state.auth = True
     st.session_state.role = cookie_role
+
+cookie_user_name = cookie_manager.get(cookie="auth_user_name")
+if cookie_user_name:
+    st.session_state.user_name = cookie_user_name
 
 # Gestion de la redirection depuis le Dashboard
 if 'page_active' not in st.session_state:
@@ -486,7 +492,9 @@ if not st.session_state.auth:
             if submitted:
                 if u == "admin" and p == "patron2024": 
                     st.session_state.auth, st.session_state.role = True, "admin"
+                    st.session_state.user_name = "Administrateur"
                     cookie_manager.set("auth_role", "admin", expires_at=datetime.now() + timedelta(days=30))
+                    cookie_manager.set("auth_user_name", "Administrateur", expires_at=datetime.now() + timedelta(days=30))
                     import time as time_mod
                     time_mod.sleep(0.5)
                     st.rerun()
@@ -498,6 +506,25 @@ if not st.session_state.auth:
                     st.rerun()
                 else: 
                     st.error("❌ Identifiants incorrects. Accès refusé.")
+
+elif st.session_state.role == "employe" and (not st.session_state.user_name or st.session_state.user_name == ""):
+    st.title("👤 Configuration de votre session")
+    st.markdown("Veuillez saisir votre Nom et Prénom pour cette session de garde. Ces informations seront automatiquement associées aux fiches clients que vous enregistrerez.")
+    
+    l_col, _ = st.columns([1.2, 2])
+    with l_col:
+        with st.form("username_form"):
+            nom_employe = st.text_input("Nom & Prénom de l'employé *")
+            if st.form_submit_button("Valider et Accéder à l'application 🚀"):
+                if not nom_employe.strip():
+                    st.error("Veuillez saisir votre nom.")
+                else:
+                    cookie_manager.set("auth_user_name", nom_employe.strip(), expires_at=datetime.now() + timedelta(days=30))
+                    st.session_state.user_name = nom_employe.strip()
+                    import time as time_mod
+                    time_mod.sleep(0.5)
+                    st.rerun()
+
 else:
     bloques, occupes = obtenir_etats()
     
@@ -521,8 +548,10 @@ else:
     
     if st.sidebar.button("Se Déconnecter 🚪"): 
         cookie_manager.delete("auth_role")
+        cookie_manager.delete("auth_user_name")
         st.session_state.auth = False
         st.session_state.role = None
+        st.session_state.user_name = ""
         st.session_state.page_active = "🏠 Tableau de bord"
         import time as time_mod
         time_mod.sleep(0.5)
@@ -889,7 +918,7 @@ else:
                         nuits = st.number_input("Nombre de Nuits *", min_value=1, step=1)
                         statut_paiement = st.selectbox("Statut Paiement", ["Non Payé", "Payé"])
                         rais_s = st.text_area("Raison du séjour", height=60)
-                        enom = st.text_input("Employé Responsable")
+                        enom = st.text_input("Employé Responsable", value=st.session_state.get("user_name", ""))
                         etel = st.text_input("Téléphone de l'Employé")
                     
                     st.markdown("---")
@@ -981,7 +1010,7 @@ else:
                 c_act1, c_act2 = st.columns(2)
                 with c_act1:
                     rais_s = st.text_area("Raison du séjour", height=100)
-                    enom = st.text_input("Employé de Garde Responsable")
+                    enom = st.text_input("Employé de Garde Responsable", value=st.session_state.get("user_name", ""))
                     etel = st.text_input("Téléphone de l'Employé")
                 with c_act2:
                     st.info("💡 Ne remplir le démarcheur que s'il y a lieu de lui verser une commission (10%).")
