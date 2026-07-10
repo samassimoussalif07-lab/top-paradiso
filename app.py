@@ -165,6 +165,30 @@ def obtenir_etats() -> tuple[dict, dict]:
             if str(row.get("Statut")).lower() == "inaccessible":
                 bloques[str(row.get("Appartement"))] = str(row.get("Raison", "Maintenance technique"))
 
+    # Mise à jour automatique des séjours expirés dans SheetDB
+    mises_a_jour_faites = False
+    if not df_s.empty and "Statut" in df_s.columns:
+        en_cours = df_s[df_s["Statut"] == "En cours"]
+        for _, row in en_cours.iterrows():
+            try:
+                ds = str(row.get("Date_Sortie"))
+                h_lib = CONFIG["TZ_BF"].localize(datetime.combine(datetime.strptime(ds, "%Y-%m-%d"), time(11, 0)))
+                if now >= h_lib:
+                    id_sej = str(row.get("id", ""))
+                    # PATCH dans SheetDB : statut = Terminé, paiement = Payé
+                    st.session_state.api_session.patch(
+                        f"{CONFIG['API_URL']}/id/{id_sej}?sheet=sejours",
+                        json={"data": {"Statut": "Terminé", "Paiement": "Payé"}}
+                    )
+                    mises_a_jour_faites = True
+            except:
+                continue
+
+    # Si des séjours ont été mis à jour, on efface le cache et on recharge
+    if mises_a_jour_faites:
+        st.cache_data.clear()
+        df_s = charger("sejours")
+
     if not df_s.empty and "Statut" in df_s.columns:
         en_cours = df_s[df_s["Statut"] == "En cours"]
         for _, row in en_cours.iterrows():
@@ -274,7 +298,7 @@ def imprimer_bilan(mois_code: str, ca: float, ca_paye: float, ca_attente: float,
         pdf.cell(ws2, 8, clean_txt("Appart."), border=1, align="C", fill=True)
         pdf.cell(ws3, 8, clean_txt("Période globale"), border=1, align="C", fill=True)
         pdf.cell(ws4, 8, clean_txt("Nuits"), border=1, align="C", fill=True)
-        pdf.cell(ws5, 8, clean_txt("Montant (Mois)"), border=1, align="C", fill=True, ln=True)
+        pdf.cell(ws5, 8, clean_txt(f"{int(r.get('Montant',0)):,} F".replace(',', ' ')), border=1, align="C", fill=True, ln=True)
         
         pdf.set_font("Arial", "", 9)
         for _, r in df_s_mois.iterrows():
@@ -830,7 +854,11 @@ else:
                 if st.button("🏁 Mettre fin au séjour", key=f"fin_dash_{selected_app}", use_container_width=True, type="secondary"):
                     st.session_state.api_session.patch(
                         f"{CONFIG['API_URL']}/id/{info['id_sej']}?sheet=sejours",
-                        json={"data": {"Statut": "Terminé", "Date_Sortie": str(datetime.now(CONFIG["TZ_BF"]).date())}}
+                        json={"data": {
+                            "Statut": "Terminé",
+                            "Paiement": "Payé",
+                            "Date_Sortie": str(datetime.now(CONFIG["TZ_BF"]).date())
+                        }}
                     )
                     st.success(f"Séjour terminé pour {selected_app}.")
                     st.cache_data.clear()
@@ -1328,7 +1356,7 @@ else:
                     f_col2.metric("DONT CA ENCAISSÉ (PAYÉ)", f"{ca_paye:,.0f} F", help="Argent déjà reçu")
                     f_col3.metric("DEPENSES", f"{dep:,.0f} F", delta_color="inverse")
                     f_col4.metric("BENEFICE NET", f"{net:,.0f} F", delta="Calculé")
- 
+
                     st.markdown("---")
                     col_t1, col_t2 = st.columns(2)
                     with col_t1:
