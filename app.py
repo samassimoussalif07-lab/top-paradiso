@@ -492,9 +492,7 @@ if not st.session_state.auth:
             if submitted:
                 if u == "admin" and p == "patron2024": 
                     st.session_state.auth, st.session_state.role = True, "admin"
-                    st.session_state.user_name = "Administrateur"
                     cookie_manager.set("auth_role", "admin", expires_at=datetime.now() + timedelta(days=30))
-                    cookie_manager.set("auth_user_name", "Administrateur", expires_at=datetime.now() + timedelta(days=30))
                     import time as time_mod
                     time_mod.sleep(0.5)
                     st.rerun()
@@ -507,25 +505,33 @@ if not st.session_state.auth:
                 else: 
                     st.error("❌ Identifiants incorrects. Accès refusé.")
 
-elif st.session_state.role == "employe" and (not st.session_state.user_name or st.session_state.user_name == ""):
+elif not st.session_state.user_name or st.session_state.user_name == "":
     st.title("👤 Configuration de votre session")
-    st.markdown("Veuillez saisir votre Nom et Prénom pour cette session de garde. Ces informations seront automatiquement associées aux fiches clients que vous enregistrerez.")
+    st.markdown("Veuillez saisir votre Nom et Prénom pour cette session. Ces informations seront affichées à l'écran et associées aux fiches clients que vous enregistrerez.")
     
     l_col, _ = st.columns([1.2, 2])
     with l_col:
         with st.form("username_form"):
-            nom_employe = st.text_input("Nom & Prénom de l'employé *")
+            nom_utilisateur = st.text_input("Nom & Prénom de l'utilisateur *")
             if st.form_submit_button("Valider et Accéder à l'application 🚀"):
-                if not nom_employe.strip():
+                if not nom_utilisateur.strip():
                     st.error("Veuillez saisir votre nom.")
                 else:
-                    cookie_manager.set("auth_user_name", nom_employe.strip(), expires_at=datetime.now() + timedelta(days=30))
-                    st.session_state.user_name = nom_employe.strip()
+                    cookie_manager.set("auth_user_name", nom_utilisateur.strip(), expires_at=datetime.now() + timedelta(days=30))
+                    st.session_state.user_name = nom_utilisateur.strip()
                     import time as time_mod
                     time_mod.sleep(0.5)
                     st.rerun()
 
 else:
+    # Affichage du nom d'utilisateur connecté tout en haut
+    st.markdown(
+        f"<div style='text-align: right; font-size: 14px; font-weight: bold; color: #7f8c8d; margin-bottom: -10px; margin-top: -10px;'>"
+        f"👤 Utilisateur connecté : <span style='color: #2c3e50;'>{st.session_state.user_name}</span>"
+        f"</div>", 
+        unsafe_allow_html=True
+    )
+    
     bloques, occupes = obtenir_etats()
     
     st.sidebar.image("https://img.icons8.com/color/96/city-buildings.png", width=64)
