@@ -8,6 +8,7 @@ import pytz
 import urllib.parse
 import json
 import os
+import sqlite3
 
 # --- CONFIGURATION INITIALE ---
 st.set_page_config(page_title="Résidence PARADISO - Gestion", page_icon="🏢", layout="wide")
@@ -19,23 +20,77 @@ CONFIG = {
     "TZ_BF": pytz.timezone('Africa/Ouagadougou')
 }
 
+MODES_PAIEMENT = ["Espèces", "Orange Money", "Moov Money", "Wave"]
+
 MOIS_FR = {
     "01": "JANVIER", "02": "FEVRIER", "03": "MARS", "04": "AVRIL",
     "05": "MAI", "06": "JUIN", "07": "JUILLET", "08": "AOUT",
     "09": "SEPTEMBRE", "10": "OCTOBRE", "11": "NOVEMBRE", "12": "DECEMBRE"
 }
 
+DB_PATH = "residence_data.db"
+
+# --- INITIALISATION BASE DE DONNÉES SQLITE LOCALE (OFFLINE-FIRST) ---
+def init_sqlite_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS sejours (
+            id TEXT PRIMARY KEY,
+            Client_Nom TEXT,
+            Date_Naissance TEXT,
+            Provenance TEXT,
+            Piece_Type TEXT,
+            Piece_Num TEXT,
+            Tel_Client TEXT,
+            Date_Entree TEXT,
+            Date_Sortie TEXT,
+            Raison TEXT,
+            Appartement TEXT,
+            Employe_Nom TEXT,
+            Employe_Tel TEXT,
+            Demarcheur_Nom TEXT,
+            Demarcheur_Tel TEXT,
+            Montant_Total REAL,
+            Commission REAL,
+            Mois TEXT,
+            Statut TEXT,
+            Paiement TEXT,
+            Mode_Paiement TEXT
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS depenses (
+            id TEXT PRIMARY KEY,
+            Date TEXT,
+            Motif TEXT,
+            Montant REAL,
+            Appartement TEXT,
+            Mois TEXT
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS maintenance (
+            Appartement TEXT PRIMARY KEY,
+            Statut TEXT,
+            Raison TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+init_sqlite_db()
+
 # --- SESSION API OPTIMISEE ---
-# Gérer une session unique (Keep-Alive) rend les requêtes vers SheetDB beaucoup plus rapides
 if "api_session" not in st.session_state:
     session = requests.Session()
     session.headers.update({'Content-Type': 'application/json'})
     st.session_state.api_session = session
 
-# --- INJECTION CSS (STYLE DES CARTES) ---
+# --- INJECTION CSS (STYLE DES CARTES & UI) ---
 st.markdown("""
 <style>
-    /* Masquage de l'icône GitHub injectée par Streamlit Cloud */
+    /* Masquage des badges Streamlit Cloud */
     [data-testid="stGitHubIcon"],
     .viewerBadge_container__1QSob,
     .styles_viewerBadge__1yB5_,
@@ -64,7 +119,23 @@ st.markdown("""
         background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); 
     }
     div.card-occupe { 
-        background: linear-gradient(135deg, #f39c12 0%, #d35400 100%); 
+        background: linear-gradient(135deg, #e67e22 0%, #d35400 100%); 
+    }
+    div.card-depart-today {
+        background: linear-gradient(135deg, #f39c12 0%, #f1c40f 100%);
+        color: #111111 !important;
+    }
+    div.card-depart-today h3, div.card-depart-today p, div.card-depart-today small {
+        color: #111111 !important;
+    }
+    div.card-retard {
+        background: linear-gradient(135deg, #c0392b 0%, #8e44ad 100%);
+        animation: pulseAlert 2s infinite;
+    }
+    @keyframes pulseAlert {
+        0% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.7); }
+        70% { box-shadow: 0 0 0 12px rgba(231, 76, 60, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0); }
     }
     div.card-libre { 
         background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%); 
@@ -72,7 +143,6 @@ st.markdown("""
     
     div.card h3 { 
         margin: 0 0 10px 0; 
-        color: white; 
         font-size: 22px; 
         font-weight: 700;
         text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
@@ -84,7 +154,7 @@ st.markdown("""
         text-transform: uppercase;
     }
     div.card small { 
-        opacity: 0.9; 
+        opacity: 0.95; 
         font-size: 13px;
         display: block;
         margin-top: 8px;
@@ -94,29 +164,172 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# --- FONCTIONS API ---
-@st.cache_data(ttl=5) # Cache très court
+# --- FONCTIONS DE SYNCHRONISATION SQLITE & SHEETDB ---
+def sync_sqlite_from_df(df: pd.DataFrame, onglet: str):
+    if df.empty:
+        return
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        if onglet == "sejours":
+            for _, row in df.iterrows():
+                row_dict = row.to_dict()
+                id_val = str(row_dict.get("id", "")).strip()
+                if not id_val: continue
+                conn.execute('''
+                    INSERT OR REPLACE INTO sejours 
+                    (id, Client_Nom, Date_Naissance, Provenance, Piece_Type, Piece_Num, Tel_Client,
+                     Date_Entree, Date_Sortie, Raison, Appartement, Employe_Nom, Employe_Tel,
+                     Demarcheur_Nom, Demarcheur_Tel, Montant_Total, Commission, Mois, Statut, Paiement, Mode_Paiement)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    id_val,
+                    str(row_dict.get("Client_Nom", "")),
+                    str(row_dict.get("Date_Naissance", "")),
+                    str(row_dict.get("Provenance", "")),
+                    str(row_dict.get("Piece_Type", "")),
+                    str(row_dict.get("Piece_Num", "")),
+                    str(row_dict.get("Tel_Client", "")),
+                    str(row_dict.get("Date_Entree", "")),
+                    str(row_dict.get("Date_Sortie", "")),
+                    str(row_dict.get("Raison", "")),
+                    str(row_dict.get("Appartement", "")),
+                    str(row_dict.get("Employe_Nom", "")),
+                    str(row_dict.get("Employe_Tel", "")),
+                    str(row_dict.get("Demarcheur_Nom", "")),
+                    str(row_dict.get("Demarcheur_Tel", "")),
+                    float(row_dict.get("Montant_Total", 0) or 0),
+                    float(row_dict.get("Commission", 0) or 0),
+                    str(row_dict.get("Mois", "")),
+                    str(row_dict.get("Statut", "")),
+                    str(row_dict.get("Paiement", "")),
+                    str(row_dict.get("Mode_Paiement", "Espèces"))
+                ))
+        elif onglet == "depenses":
+            for _, row in df.iterrows():
+                row_dict = row.to_dict()
+                id_val = str(row_dict.get("id", "")).strip()
+                if not id_val: continue
+                conn.execute('''
+                    INSERT OR REPLACE INTO depenses (id, Date, Motif, Montant, Appartement, Mois)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (
+                    id_val,
+                    str(row_dict.get("Date", "")),
+                    str(row_dict.get("Motif", "")),
+                    float(row_dict.get("Montant", 0) or 0),
+                    str(row_dict.get("Appartement", "")),
+                    str(row_dict.get("Mois", ""))
+                ))
+        elif onglet == "maintenance":
+            for _, row in df.iterrows():
+                row_dict = row.to_dict()
+                app_val = str(row_dict.get("Appartement", "")).strip()
+                if not app_val: continue
+                conn.execute('''
+                    INSERT OR REPLACE INTO maintenance (Appartement, Statut, Raison)
+                    VALUES (?, ?, ?)
+                ''', (
+                    app_val,
+                    str(row_dict.get("Statut", "")),
+                    str(row_dict.get("Raison", ""))
+                ))
+        conn.commit()
+    except Exception as ex:
+        pass
+    finally:
+        conn.close()
+
+def charger_sqlite(onglet: str) -> pd.DataFrame:
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        df = pd.read_sql_query(f"SELECT * FROM {onglet}", conn)
+        return df
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+@st.cache_data(ttl=5)
 def charger(onglet: str) -> pd.DataFrame:
     try:
-        r = st.session_state.api_session.get(f"{CONFIG['API_URL']}?sheet={onglet}", timeout=10)
-        return pd.DataFrame(r.json()) if r.status_code == 200 else pd.DataFrame()
-    except Exception as e:
-        st.error(f"Erreur de réseau : {e}")
-        return pd.DataFrame()
+        r = st.session_state.api_session.get(f"{CONFIG['API_URL']}?sheet={onglet}", timeout=5)
+        if r.status_code == 200:
+            df = pd.DataFrame(r.json())
+            sync_sqlite_from_df(df, onglet)
+            return df
+        else:
+            return charger_sqlite(onglet)
+    except Exception:
+        return charger_sqlite(onglet)
 
 def sauver(ligne: dict, onglet: str) -> bool:
+    df_single = pd.DataFrame([ligne])
+    sync_sqlite_from_df(df_single, onglet)
     try:
-        r = st.session_state.api_session.post(f"{CONFIG['API_URL']}?sheet={onglet}", json={"data": [ligne]}, timeout=10)
-        return r.status_code == 201
-    except:
-        return False
+        r = st.session_state.api_session.post(f"{CONFIG['API_URL']}?sheet={onglet}", json={"data": [ligne]}, timeout=5)
+        return True
+    except Exception:
+        return True
+
+def patch_sejour(id_sej: str, patch_data: dict) -> bool:
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        set_clauses = ", ".join([f"{k} = ?" for k in patch_data.keys()])
+        values = list(patch_data.values()) + [id_sej]
+        conn.execute(f"UPDATE sejours SET {set_clauses} WHERE id = ?", values)
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+    try:
+        res = st.session_state.api_session.patch(
+            f"{CONFIG['API_URL']}/id/{id_sej}?sheet=sejours",
+            json={"data": patch_data},
+            timeout=5
+        )
+        return True
+    except Exception:
+        return True
 
 def supprimer_ligne(onglet: str, colonne: str, valeur: str) -> bool:
+    conn = sqlite3.connect(DB_PATH)
     try:
-        r = st.session_state.api_session.delete(f"{CONFIG['API_URL']}/{colonne}/{valeur}?sheet={onglet}")
-        return r.status_code in [200, 204]
-    except:
-        return False
+        conn.execute(f"DELETE FROM {onglet} WHERE {colonne} = ?", (valeur,))
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+    try:
+        st.session_state.api_session.delete(f"{CONFIG['API_URL']}/{colonne}/{valeur}?sheet={onglet}", timeout=5)
+    except Exception:
+        pass
+    return True
+
+def actualiser_maintenance(appartement: str, statut: str, raison: str) -> bool:
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.execute("INSERT OR REPLACE INTO maintenance (Appartement, Statut, Raison) VALUES (?, ?, ?)",
+                     (appartement, statut, raison))
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+    url = f"{CONFIG['API_URL']}/Appartement/{appartement}?sheet=maintenance"
+    payload = {"data": {"Statut": statut, "Raison": raison}}
+    try:
+        res = st.session_state.api_session.patch(url, json=payload, timeout=5)
+        if res.status_code not in [200, 204]:
+            sauver({"Appartement": appartement, "Statut": statut, "Raison": raison}, "maintenance")
+    except Exception:
+        sauver({"Appartement": appartement, "Statut": statut, "Raison": raison}, "maintenance")
+    return True
+
 
 # --- FONCTIONS MESSAGERIE (CHAT) ---
 CHAT_DB_PATH = "chat_db.json"
@@ -153,7 +366,8 @@ def delete_chat_message(msg_id):
         with open(CHAT_DB_PATH, "w", encoding="utf-8") as f:
             json.dump(msgs, f, ensure_ascii=False, indent=2)
 
-# --- LOGIQUE ETATS (OCCUPATION & MAINTENANCE) ---
+
+# --- LOGIQUE ETATS (OCCUPATION, MAINTENANCE & ALERTES 11H00) ---
 def obtenir_etats() -> tuple[dict, dict]:
     df_s = charger("sejours")
     df_m = charger("maintenance")
@@ -162,58 +376,44 @@ def obtenir_etats() -> tuple[dict, dict]:
 
     if not df_m.empty and "Statut" in df_m.columns:
         for _, row in df_m.iterrows():
-            if str(row.get("Statut")).lower() == "inaccessible":
-                bloques[str(row.get("Appartement"))] = str(row.get("Raison", "Maintenance technique"))
-
-    # Mise à jour automatique des séjours expirés dans SheetDB
-    mises_a_jour_faites = False
-    if not df_s.empty and "Statut" in df_s.columns:
-        en_cours = df_s[df_s["Statut"] == "En cours"]
-        for _, row in en_cours.iterrows():
-            try:
-                ds = str(row.get("Date_Sortie"))
-                h_lib = CONFIG["TZ_BF"].localize(datetime.combine(datetime.strptime(ds, "%Y-%m-%d"), time(11, 0)))
-                if now >= h_lib:
-                    id_sej = str(row.get("id", ""))
-                    # PATCH dans SheetDB : statut = Terminé, paiement = Payé
-                    st.session_state.api_session.patch(
-                        f"{CONFIG['API_URL']}/id/{id_sej}?sheet=sejours",
-                        json={"data": {"Statut": "Terminé", "Paiement": "Payé"}}
-                    )
-                    mises_a_jour_faites = True
-            except:
-                continue
-
-    # Si des séjours ont été mis à jour, on efface le cache et on recharge
-    if mises_a_jour_faites:
-        st.cache_data.clear()
-        df_s = charger("sejours")
+            appart = str(row.get("Appartement"))
+            statut = str(row.get("Statut", "")).lower()
+            if statut == "inaccessible":
+                bloques[appart] = str(row.get("Raison", "Maintenance technique"))
+            else:
+                if appart in bloques:
+                    del bloques[appart]
 
     if not df_s.empty and "Statut" in df_s.columns:
         en_cours = df_s[df_s["Statut"] == "En cours"]
         for _, row in en_cours.iterrows():
             try:
-                ds = str(row.get("Date_Sortie"))
-                h_lib = CONFIG["TZ_BF"].localize(datetime.combine(datetime.strptime(ds, "%Y-%m-%d"), time(11, 0)))
-                if now < h_lib: 
-                    try:
-                        de = str(row.get("Date_Entree", ""))
-                        debut_str = "/".join(de.split("-")[::-1]) if "-" in de else de
-                    except:
-                        debut_str = ""
-                        
-                    occupes[str(row.get("Appartement"))] = {
-                        "debut": debut_str,
-                        "fin": h_lib.strftime("%d/%m/%Y à 11h00"),
-                        "paiement": str(row.get("Paiement", "Non Payé")),
-                        "id_sej": str(row.get("id", "")),
-                        "client": str(row.get("Client_Nom", "")),
-                        "montant": float(row.get("Montant_Total", 0) or 0),
-                        "tel": str(row.get("Tel_Client", ""))
-                    }
-            except:
+                ds_str = str(row.get("Date_Sortie"))
+                ds_dt = datetime.strptime(ds_str, "%Y-%m-%d")
+                h_lib = CONFIG["TZ_BF"].localize(datetime.combine(ds_dt.date(), time(11, 0)))
+                
+                de = str(row.get("Date_Entree", ""))
+                debut_str = "/".join(de.split("-")[::-1]) if "-" in de else de
+                
+                retard = (now >= h_lib)
+                depart_aujourdhui = (now.date() == ds_dt.date() and not retard)
+                
+                occupes[str(row.get("Appartement"))] = {
+                    "debut": debut_str,
+                    "fin": h_lib.strftime("%d/%m/%Y à 11h00"),
+                    "paiement": str(row.get("Paiement", "Non Payé")),
+                    "mode_paiement": str(row.get("Mode_Paiement", "Espèces")),
+                    "id_sej": str(row.get("id", "")),
+                    "client": str(row.get("Client_Nom", "")),
+                    "montant": float(row.get("Montant_Total", 0) or 0),
+                    "tel": str(row.get("Tel_Client", "")),
+                    "retard": retard,
+                    "depart_aujourdhui": depart_aujourdhui
+                }
+            except Exception:
                 continue
     return bloques, occupes
+
 
 # --- GÉNÉRATEUR PDF ROBUSTE (Latin-1) ---
 def imprimer_bilan(mois_code: str, ca: float, ca_paye: float, ca_attente: float, comm: float, dep: float, net: float, df_dep: pd.DataFrame, df_s_mois: pd.DataFrame) -> bytes:
@@ -229,30 +429,29 @@ def imprimer_bilan(mois_code: str, ca: float, ca_paye: float, ca_attente: float,
 
     # En-tête professionnel
     pdf.set_font("Arial", "B", 20)
-    pdf.set_text_color(44, 62, 80) # Bleu nuit
+    pdf.set_text_color(44, 62, 80)
     pdf.cell(0, 12, clean_txt("RÉSIDENCE PARADISO"), ln=True, align="C")
     
     pdf.set_font("Arial", "", 11)
-    pdf.set_text_color(127, 140, 141) # Gris
+    pdf.set_text_color(127, 140, 141)
     pdf.cell(0, 6, clean_txt("Téléphone de la résidence : +226 64353550"), ln=True, align="C")
     
     pdf.ln(5)
     pdf.set_draw_color(189, 195, 199)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y()) # Séparateur
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.ln(10)
 
     # Titre du bilan
     pdf.set_font("Arial", "B", 14)
-    pdf.set_text_color(0, 0, 0) # Noir
+    pdf.set_text_color(0, 0, 0)
     pdf.cell(0, 10, clean_txt(titre_bilan), ln=True, align="C")
     pdf.ln(8)
     
     # Résumé Financier (Tableau)
     pdf.set_font("Arial", "B", 11)
-    pdf.set_fill_color(236, 240, 241) # Fond gris clair
-    pdf.set_draw_color(189, 195, 199) # Bordures
+    pdf.set_fill_color(236, 240, 241)
+    pdf.set_draw_color(189, 195, 199)
     
-    # Largeurs colonnes
     w1, w2 = 95, 95
     
     pdf.cell(w1, 10, clean_txt("CHIFFRE D'AFFAIRES (CA) GLOBAL"), border=1, align="L", fill=True)
@@ -265,28 +464,25 @@ def imprimer_bilan(mois_code: str, ca: float, ca_paye: float, ca_attente: float,
     pdf.cell(w1, 8, clean_txt("   Dont CA En Attente (Non Payé)"), border="LRB", align="L")
     pdf.cell(w2, 8, clean_txt(f"{int(ca_attente):,} F CFA".replace(',', ' ')), border="LRB", align="R", ln=True)
     
-    # Ligne Commissions
     pdf.set_font("Arial", "B", 11)
     pdf.cell(w1, 10, clean_txt("TOTAL COMMISSIONS"), border=1, align="L", fill=True)
     pdf.set_font("Arial", "", 11)
     pdf.cell(w2, 10, clean_txt(f"{int(comm):,} F CFA".replace(',', ' ')), border=1, align="R", ln=True)
     
-    # Ligne Dépenses
     pdf.set_font("Arial", "B", 11)
     pdf.cell(w1, 10, clean_txt("TOTAL DÉPENSES"), border=1, align="L", fill=True)
     pdf.set_font("Arial", "", 11)
     pdf.cell(w2, 10, clean_txt(f"{int(dep):,} F CFA".replace(',', ' ')), border=1, align="R", ln=True)
     
-    # Ligne NET
     pdf.set_font("Arial", "B", 12)
-    pdf.set_text_color(39, 174, 96) # Vert pour le bénéfice
+    pdf.set_text_color(39, 174, 96)
     pdf.cell(w1, 10, clean_txt("BÉNÉFICE NET RESTANT"), border=1, align="L", fill=True)
     pdf.cell(w2, 10, clean_txt(f"{int(net):,} F CFA".replace(',', ' ')), border=1, align="R", ln=True)
     
     pdf.set_text_color(0, 0, 0)
     pdf.ln(10)
     
-    # Détail des revenus (Séjours du mois)
+    # Détail des revenus
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 10, clean_txt("DÉTAIL DES REVENUS DU MOIS (PRORATA) :"), ln=True)
     
@@ -313,7 +509,7 @@ def imprimer_bilan(mois_code: str, ca: float, ca_paye: float, ca_attente: float,
         
     pdf.ln(5)
 
-    # Détail des dépenses (Tableau)
+    # Détail des dépenses
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 10, clean_txt("DÉTAIL DES DÉPENSES :"), ln=True)
     
@@ -357,94 +553,84 @@ def generer_recu_pdf(info: dict, appart: str) -> bytes:
 
     # En-tête professionnel
     pdf.set_font("Arial", "B", 20)
-    pdf.set_text_color(44, 62, 80) # Couleur bleu nuit/gris foncé
+    pdf.set_text_color(44, 62, 80)
     pdf.cell(0, 12, clean_txt("RÉSIDENCE PARADISO"), ln=True, align="C")
     
     pdf.set_font("Arial", "", 11)
-    pdf.set_text_color(127, 140, 141) # Couleur grise
+    pdf.set_text_color(127, 140, 141)
     pdf.cell(0, 6, clean_txt("Téléphone de la résidence : +226 64353550"), ln=True, align="C")
     
     pdf.ln(5)
     pdf.set_draw_color(189, 195, 199)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y()) # Ligne de séparation
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.ln(10)
     
     # Titre du document
     pdf.set_font("Arial", "B", 14)
-    pdf.set_text_color(0, 0, 0) # Noir
+    pdf.set_text_color(0, 0, 0)
     pdf.cell(0, 10, clean_txt("REÇU DE SÉJOUR"), ln=True, align="C")
     pdf.ln(8)
     
-    # Info Client Simple
+    # Info Client
     pdf.set_font("Arial", "", 11)
     pdf.cell(0, 6, clean_txt(f"Client : {info.get('client', '')}"), ln=True)
     pdf.cell(0, 6, clean_txt(f"Téléphone : {info.get('tel', '')}"), ln=True)
     pdf.cell(0, 6, clean_txt(f"Début du séjour : {info.get('debut', '')}"), ln=True)
     pdf.cell(0, 6, clean_txt(f"Fin du séjour : {info.get('fin', '')}"), ln=True)
+    mode_p = info.get('mode_paiement', 'Espèces')
+    pdf.cell(0, 6, clean_txt(f"Mode de règlement : {mode_p}"), ln=True)
     pdf.ln(8)
     
     # Détails Financiers (Tableau Quadrillé)
     montant = int(info.get('montant', 0))
-    prix_unitaire = 15000  # PRIX_NUITEE (15000 par défaut dans l'app)
+    prix_unitaire = CONFIG["PRIX_NUITEE"]
     nuits = montant // prix_unitaire if prix_unitaire else 0
     
-    # En-tête Tableau
     pdf.set_font("Arial", "B", 11)
-    pdf.set_fill_color(236, 240, 241) # Fond gris clair
-    pdf.set_draw_color(189, 195, 199) # Bordures
+    pdf.set_fill_color(236, 240, 241)
+    pdf.set_draw_color(189, 195, 199)
     
-    # Largeur des colonnes (Total = 190)
-    w_des = 80
-    w_pu = 35
-    w_qte = 25
-    w_tot = 50
+    w_des, w_pu, w_qte, w_tot = 80, 35, 25, 50
     
     pdf.cell(w_des, 8, clean_txt("Désignation"), border=1, align="C", fill=True)
     pdf.cell(w_pu, 8, clean_txt("Prix Unitaire"), border=1, align="C", fill=True)
     pdf.cell(w_qte, 8, clean_txt("Nuits"), border=1, align="C", fill=True)
     pdf.cell(w_tot, 8, clean_txt("Total"), border=1, align="C", fill=True, ln=True)
     
-    # Ligne de données
     pdf.set_font("Arial", "", 11)
     pdf.cell(w_des, 10, clean_txt(f"Séjour - {appart}"), border=1)
     pdf.cell(w_pu, 10, clean_txt(f"{prix_unitaire:,} F".replace(',', ' ')), border=1, align="R")
     pdf.cell(w_qte, 10, clean_txt(str(nuits)), border=1, align="C")
     pdf.cell(w_tot, 10, clean_txt(f"{montant:,} F CFA".replace(',', ' ')), border=1, align="R", ln=True)
     
-    # Résumé Paiement
     pdf.ln(8)
     
     val_paye = str(info.get('paiement', '')).strip().lower()
     est_paye = (val_paye == "payé" or val_paye == "paye")
-    statut_str = "RÉGLÉ" if est_paye else "NON RÉGLÉ"
+    statut_str = f"RÉGLÉ ({mode_p.upper()})" if est_paye else "NON RÉGLÉ"
     
-    # Mettre en couleur le statut final
     if est_paye:
-        pdf.set_text_color(39, 174, 96) # Vert pour réglé
+        pdf.set_text_color(39, 174, 96)
     else:
-        pdf.set_text_color(192, 57, 43) # Rouge pour non réglé
+        pdf.set_text_color(192, 57, 43)
         
     pdf.set_font("Arial", "B", 12)
     pdf.cell(190, 8, clean_txt(f"STATUT PAIE. : {statut_str}"), align="R", ln=True)
-    pdf.set_text_color(0, 0, 0) # Rétablir le noir
+    pdf.set_text_color(0, 0, 0)
     
-    # Pied de page
     pdf.ln(15)
     pdf.set_draw_color(189, 195, 199)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y()) # Ligne de séparation
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.ln(5)
     
     pdf.set_font("Arial", "I", 10)
     pdf.set_text_color(127, 140, 141)
     pdf.cell(0, 10, clean_txt("Merci de votre confiance. Contactez-nous pour toute assistance."), ln=True, align="C")
     
-    # Signature
     pdf.ln(5)
     y_sig = pdf.get_y()
     pdf.cell(0, 5, clean_txt("La Direction PARADISO."), ln=True, align="R")
     
-    # Ajout de l'image de signature si elle existe
-    import os
     if os.path.exists("signature.png"):
         pdf.image("signature.png", x=150, y=y_sig + 5, w=40)
     elif os.path.exists("signature.jpg"):
@@ -462,7 +648,7 @@ if 'auth' not in st.session_state:
 if 'user_name' not in st.session_state:
     st.session_state.user_name = ""
 
-# Try to auto-login via cookie
+# Auto-login via cookie
 cookie_role = cookie_manager.get(cookie="auth_role")
 if not st.session_state.auth and cookie_role in ["admin", "employe"]:
     st.session_state.auth = True
@@ -472,7 +658,6 @@ cookie_user_name = cookie_manager.get(cookie="auth_user_name")
 if cookie_user_name:
     st.session_state.user_name = cookie_user_name
 
-# Gestion de la redirection depuis le Dashboard
 if 'page_active' not in st.session_state:
     st.session_state.page_active = "🏠 Tableau de bord"
 if 'appart_cible' not in st.session_state:
@@ -524,7 +709,7 @@ elif not st.session_state.user_name or st.session_state.user_name == "":
                     st.rerun()
 
 else:
-    # Affichage du nom d'utilisateur connecté tout en haut
+    # Affichage utilisateur connecté
     st.markdown(
         f"<div style='text-align: right; font-size: 14px; font-weight: bold; color: #7f8c8d; margin-bottom: -10px; margin-top: -10px;'>"
         f"👤 Utilisateur connecté : <span style='color: #2c3e50;'>{st.session_state.user_name}</span>"
@@ -538,7 +723,6 @@ else:
     st.sidebar.markdown(f"**Rôle Actif:** `{st.session_state.role.upper()}`")
     st.sidebar.info(f"📍 Ouagadougou : {datetime.now(CONFIG['TZ_BF']).strftime('%H:%M')}")
     
-    # Callback pour synchroniser les changements de page via la sidebar
     def sync_menu():
         st.session_state.page_active = st.session_state._menu_radio
         
@@ -595,14 +779,13 @@ else:
                         
                         col_r1.markdown(f"**{client_nom}** ({row.get('Tel_Client', '')})")
                         col_r2.markdown(f"🏠 {appart_nom} | Du {date_entree} au {date_sortie}")
-                        col_r3.markdown(f"Statut: `{statut_sej}` | Paiement: `{row.get('Paiement', '')}`")
+                        col_r3.markdown(f"Statut: `{statut_sej}` | Paiement: `{row.get('Paiement', '')}` ({row.get('Mode_Paiement', 'Espèces')})")
                         
                         if col_r4.button("✏️ Modifier", key=f"search_edit_{id_sej}", use_container_width=True):
                             st.session_state.editing_search_id = id_sej
-                            st.session_state.selected_app = None # close app panel to focus on search edit
+                            st.session_state.selected_app = None
                             st.rerun()
                             
-                    # Formulaire d'édition de la recherche si activé
                     if "editing_search_id" in st.session_state and st.session_state.editing_search_id:
                         selected_id = st.session_state.editing_search_id
                         selected_rows = df_sejours[df_sejours["id"] == selected_id]
@@ -639,6 +822,8 @@ else:
                                     e_montant = st.number_input("Montant Total (F CFA)", value=int(m_tot_val), step=1000)
                                     val_paiement_s = str(selected_row.get("Paiement", "Non Payé")).lower()
                                     e_paiement = st.selectbox("Statut Paiement", ["Non Payé", "Payé"], index=1 if val_paiement_s in ["payé", "paye"] else 0)
+                                    cur_mode_p = str(selected_row.get("Mode_Paiement", "Espèces"))
+                                    e_mode_p = st.selectbox("Mode de Règlement", MODES_PAIEMENT, index=MODES_PAIEMENT.index(cur_mode_p) if cur_mode_p in MODES_PAIEMENT else 0)
                                     e_statut = st.selectbox("Statut Séjour", ["En cours", "Terminé"], index=1 if str(selected_row.get("Statut", "En cours")).lower() == "terminé" else 0)
 
                                 st.write("---")
@@ -660,28 +845,23 @@ else:
                                             "Date_Entree": str(e_dent), "Date_Sortie": str(dsor_edit), "Raison": e_rais, 
                                             "Appartement": e_app, "Employe_Nom": e_enom, 
                                             "Demarcheur_Nom": e_dnom, "Montant_Total": e_montant, 
-                                            "Commission": e_comm, "Statut": e_statut, "Paiement": e_paiement
+                                            "Commission": e_comm, "Statut": e_statut, "Paiement": e_paiement,
+                                            "Mode_Paiement": e_mode_p
                                         }
-                                        res = st.session_state.api_session.patch(
-                                            f"{CONFIG['API_URL']}/id/{selected_id}?sheet=sejours",
-                                            json={"data": updated_data}
-                                        )
-                                        if res.status_code in [200, 201, 204] or "updated" in res.text.lower():
-                                            st.success("✅ Modifications enregistrées !")
-                                            st.session_state.editing_search_id = None
-                                            st.cache_data.clear()
-                                            import time as time_mod
-                                            time_mod.sleep(1.5)
-                                            st.rerun()
-                                        else:
-                                            st.error("Erreur lors de la mise à jour.")
+                                        patch_sejour(selected_id, updated_data)
+                                        st.success("✅ Modifications enregistrées !")
+                                        st.session_state.editing_search_id = None
+                                        st.cache_data.clear()
+                                        import time as time_mod
+                                        time_mod.sleep(1.5)
+                                        st.rerun()
                                 with c_btn2:
                                     if st.form_submit_button("Annuler", use_container_width=True):
                                         st.session_state.editing_search_id = None
                                         st.rerun()
             st.divider()
 
-        # --- CARTES D'ÉTAT DES APPARTEMENTS ---
+        # --- CARTES D'ÉTAT DES APPARTEMENTS (AVEC ALERTES 11H00) ---
         cols = st.columns(4)
         for i, app in enumerate(CONFIG["APPARTEMENTS"]):
             with cols[i]:
@@ -693,22 +873,34 @@ else:
                 elif app in occupes:
                     info = occupes[app]
                     etat_paiement = str(info.get("paiement", "Non Payé")).strip()
-                    est_paye = (etat_paiement == "Payé" or etat_paiement.lower() == "payé" or etat_paiement.lower() == "paye")
-                    affichage_paiement = "Payé" if est_paye else "Non Payé"
+                    est_paye = (etat_paiement.lower() in ["payé", "paye"])
+                    affichage_paiement = f"Payé ({info.get('mode_paiement', 'Espèces')})" if est_paye else "Non Payé"
                     color_paiement = "#2ecc71" if est_paye else "#e74c3c"
                     
-                    html_card = f"""<div class='card card-occupe'>
-                                    <h3>{app}</h3><p>🔴 OCCUPÉ</p>
-                                    <small>Libre le :<br>{info['fin']}</small>
-                                    <br><span style='background-color:{color_paiement}; color:white; padding: 2px 6px; border-radius:4px; font-size:12px; font-weight:bold;'>Paiement : {affichage_paiement}</span>
-                                    </div>"""
+                    if info.get("retard"):
+                        html_card = f"""<div class='card card-retard'>
+                                        <h3>{app}</h3><p>⚠️ RETARD LIBÉRATION</p>
+                                        <small>Devait libérer le :<br>{info['fin']}</small>
+                                        <br><span style='background-color:{color_paiement}; color:white; padding: 2px 6px; border-radius:4px; font-size:12px; font-weight:bold;'>Paiement : {affichage_paiement}</span>
+                                        </div>"""
+                    elif info.get("depart_aujourdhui"):
+                        html_card = f"""<div class='card card-depart-today'>
+                                        <h3>{app}</h3><p>🟡 LIBÉRATION AUJOURD'HUI</p>
+                                        <small>Départ avant 11h00 :<br>{info['fin']}</small>
+                                        <br><span style='background-color:{color_paiement}; color:white; padding: 2px 6px; border-radius:4px; font-size:12px; font-weight:bold;'>Paiement : {affichage_paiement}</span>
+                                        </div>"""
+                    else:
+                        html_card = f"""<div class='card card-occupe'>
+                                        <h3>{app}</h3><p>🔴 OCCUPÉ</p>
+                                        <small>Libre le :<br>{info['fin']}</small>
+                                        <br><span style='background-color:{color_paiement}; color:white; padding: 2px 6px; border-radius:4px; font-size:12px; font-weight:bold;'>Paiement : {affichage_paiement}</span>
+                                        </div>"""
                     st.markdown(html_card, unsafe_allow_html=True)
                 else:
                     html_card = f"""<div class='card card-libre'>
                                     <h3>{app}</h3><p>🟢 LIBRE</p></div>"""
                     st.markdown(html_card, unsafe_allow_html=True)
                 
-                # Sélection de l'appartement pour actions rapides
                 is_selected = ("selected_app" in st.session_state and st.session_state.selected_app == app)
                 btn_label = f"⚙️ Gérer {app}" if not is_selected else f"⭐️ Activé ({app})"
                 if st.button(btn_label, key=f"select_{app}", use_container_width=True, type="secondary" if not is_selected else "primary"):
@@ -716,7 +908,6 @@ else:
                     st.session_state.editing_search_id = None
                     st.rerun()
                     
-        # Initialiser l'appartement sélectionné par défaut si aucun n'est actif
         if "selected_app" not in st.session_state or st.session_state.selected_app is None:
             st.session_state.selected_app = CONFIG["APPARTEMENTS"][0]
             
@@ -730,12 +921,7 @@ else:
             c_m1, c_m2 = st.columns(2)
             with c_m1:
                 if st.button("🟢 Rendre disponible (Terminer la maintenance)", key=f"m_dispo_{selected_app}", use_container_width=True, type="primary"):
-                    res = st.session_state.api_session.patch(
-                        f"{CONFIG['API_URL']}/Appartement/{selected_app}?sheet=maintenance", 
-                        json={"data": {"Statut": "Disponible (Fin de maintenance)", "Raison": ""}}
-                    )
-                    if res.status_code not in [200, 204]:
-                        sauver({"Appartement": selected_app, "Statut": "Disponible (Fin de maintenance)", "Raison": ""}, "maintenance")
+                    actualiser_maintenance(selected_app, "Disponible (Fin de maintenance)", "")
                     st.success(f"L'appartement {selected_app} est à nouveau disponible.")
                     st.cache_data.clear()
                     import time as time_mod
@@ -744,12 +930,7 @@ else:
             with c_m2:
                 new_reason = st.text_input("Modifier le motif de maintenance :", value=bloques[selected_app], key=f"m_reason_{selected_app}")
                 if st.button("Sauvegarder le nouveau motif", key=f"m_save_reason_{selected_app}", use_container_width=True):
-                    res = st.session_state.api_session.patch(
-                        f"{CONFIG['API_URL']}/Appartement/{selected_app}?sheet=maintenance", 
-                        json={"data": {"Statut": "Inaccessible", "Raison": new_reason}}
-                    )
-                    if res.status_code not in [200, 204]:
-                        sauver({"Appartement": selected_app, "Statut": "Inaccessible", "Raison": new_reason}, "maintenance")
+                    actualiser_maintenance(selected_app, "Inaccessible", new_reason)
                     st.success("Motif de maintenance mis à jour.")
                     st.cache_data.clear()
                     import time as time_mod
@@ -759,8 +940,13 @@ else:
         elif selected_app in occupes:
             info = occupes[selected_app]
             etat_paiement = str(info.get("paiement", "Non Payé")).strip()
-            est_paye = (etat_paiement == "Payé" or etat_paiement.lower() == "payé" or etat_paiement.lower() == "paye")
+            est_paye = (etat_paiement.lower() in ["payé", "paye"])
             
+            if info.get("retard"):
+                st.error("🚨 **ATTENTION : RETARD DE LIBÉRATION (PASSÉ 11H00 GMT)**. Veuillez procéder au Check-out ou ajouter une nuitée supplémentaire.")
+            elif info.get("depart_aujourdhui"):
+                st.warning("⏰ **RAPPEL : Déchéance aujourd'hui à 11h00 GMT**. Vérifier le départ ou la prolongation.")
+
             c_info, c_actions = st.columns([1.5, 1])
             with c_info:
                 st.markdown(f"""
@@ -770,10 +956,10 @@ else:
                 - **Date d'Entrée :** `{info['debut']}`
                 - **Libération prévue :** `{info['fin']}`
                 - **Montant Total :** `{int(info['montant']):,} F CFA`
-                - **Statut du Paiement :** {'🟢 Payé' if est_paye else '🔴 Non Payé'}
+                - **Statut du Paiement :** {'🟢 Payé' if est_paye else '🔴 Non Payé'} ({info.get('mode_paiement', 'Espèces')})
                 """)
                 
-                if st.checkbox("✏️ Modifier les détails de ce séjour", key=f"chk_edit_{selected_app}"):
+                if st.checkbox("✏️ Modifier / Prolonger ce séjour", key=f"chk_edit_{selected_app}"):
                     df_sejours = charger("sejours")
                     if not df_sejours.empty:
                         selected_rows = df_sejours[df_sejours["id"] == info["id_sej"]]
@@ -805,6 +991,8 @@ else:
                                     e_montant = st.number_input("Montant Total", value=int(m_tot_val), step=1000)
                                     val_paiement_i = str(selected_row.get("Paiement", "Non Payé")).lower()
                                     e_paiement = st.selectbox("Statut Paiement", ["Non Payé", "Payé"], index=1 if val_paiement_i in ["payé", "paye"] else 0)
+                                    cur_mode = str(selected_row.get("Mode_Paiement", "Espèces"))
+                                    e_mode_p = st.selectbox("Mode de Règlement", MODES_PAIEMENT, index=MODES_PAIEMENT.index(cur_mode) if cur_mode in MODES_PAIEMENT else 0)
                                 
                                 st.write("---")
                                 ec_act1, ec_act2 = st.columns(2)
@@ -823,42 +1011,30 @@ else:
                                         "Date_Entree": str(e_dent), "Date_Sortie": str(dsor_edit), "Raison": e_rais, 
                                         "Appartement": selected_app, "Employe_Nom": e_enom, 
                                         "Demarcheur_Nom": e_dnom, "Montant_Total": e_montant, 
-                                        "Commission": e_comm, "Paiement": e_paiement
+                                        "Commission": e_comm, "Paiement": e_paiement, "Mode_Paiement": e_mode_p
                                     }
-                                    res = st.session_state.api_session.patch(
-                                        f"{CONFIG['API_URL']}/id/{info['id_sej']}?sheet=sejours",
-                                        json={"data": updated_data}
-                                    )
-                                    if res.status_code in [200, 201, 204] or "updated" in res.text.lower():
-                                        st.success("✅ Modifications enregistrées !")
-                                        st.cache_data.clear()
-                                        import time as time_mod
-                                        time_mod.sleep(1.5)
-                                        st.rerun()
-                                    else:
-                                        st.error("Erreur lors de la mise à jour.")
+                                    patch_sejour(info['id_sej'], updated_data)
+                                    st.success("✅ Modifications enregistrées !")
+                                    st.cache_data.clear()
+                                    import time as time_mod
+                                    time_mod.sleep(1.5)
+                                    st.rerun()
             
             with c_actions:
                 st.markdown("**Actions :**")
                 if not est_paye:
                     if st.button("Valider Paiement 💸", key=f"pay_dash_{selected_app}", use_container_width=True, type="primary"):
-                        res = st.session_state.api_session.patch(
-                            f"{CONFIG['API_URL']}/id/{info['id_sej']}?sheet=sejours",
-                            json={"data": {"Paiement": "Payé"}}
-                        )
-                        if res.status_code in [200, 201, 204] or "updated" in res.text.lower():
-                            st.success("✅ Paiement validé !")
-                            st.cache_data.clear()
-                            import time as time_mod
-                            time_mod.sleep(1.5)
-                            st.rerun()
-                        else:
-                            st.error("Erreur API lors de la validation du paiement.")
+                        patch_sejour(info['id_sej'], {"Paiement": "Payé"})
+                        st.success("✅ Paiement validé !")
+                        st.cache_data.clear()
+                        import time as time_mod
+                        time_mod.sleep(1.5)
+                        st.rerun()
                 
                 pdf_bytes = generer_recu_pdf(info, selected_app)
                 st.download_button("🖨️ Télécharger Reçu PDF", data=pdf_bytes, file_name=f"Recu_{selected_app}.pdf", mime="application/pdf", key=f"dl_dash_{selected_app}", use_container_width=True)
                 
-                msg = f"Bonjour {info['client']}, voici le récapitulatif de votre séjour à {selected_app}. Montant total: {int(info['montant']):,} F CFA. Statut du paiement: {etat_paiement}."
+                msg = f"Bonjour {info['client']}, voici le récapitulatif de votre séjour à {selected_app}. Montant total: {int(info['montant']):,} F CFA. Statut du paiement: {etat_paiement} ({info.get('mode_paiement', 'Espèces')})."
                 url_msg = urllib.parse.quote(msg)
                 st.markdown(f"<a href='https://wa.me/{info['tel'].replace('+', '')}?text={url_msg}' target='_blank' style='display:block; text-align:center; background-color:#25D366; color:white; padding:8px; border-radius:4px; text-decoration:none; margin-bottom:10px; font-size:14px; font-weight:bold;'>📱 Envoyer Reçu (WhatsApp)</a>", unsafe_allow_html=True)
                 
@@ -886,15 +1062,12 @@ else:
                             else:
                                 st.warning("Veuillez remplir tous les champs.")
 
-                if st.button("🏁 Mettre fin au séjour", key=f"fin_dash_{selected_app}", use_container_width=True, type="secondary"):
-                    st.session_state.api_session.patch(
-                        f"{CONFIG['API_URL']}/id/{info['id_sej']}?sheet=sejours",
-                        json={"data": {
-                            "Statut": "Terminé",
-                            "Paiement": "Payé",
-                            "Date_Sortie": str(datetime.now(CONFIG["TZ_BF"]).date())
-                        }}
-                    )
+                if st.button("🏁 Mettre fin au séjour (Check-out)", key=f"fin_dash_{selected_app}", use_container_width=True, type="secondary"):
+                    patch_sejour(info['id_sej'], {
+                        "Statut": "Terminé",
+                        "Paiement": "Payé",
+                        "Date_Sortie": str(datetime.now(CONFIG["TZ_BF"]).date())
+                    })
                     st.success(f"Séjour terminé pour {selected_app}.")
                     st.cache_data.clear()
                     import time as time_mod
@@ -923,6 +1096,7 @@ else:
                         dent = st.date_input("Date d'Entrée", value=date.today())
                         nuits = st.number_input("Nombre de Nuits *", min_value=1, step=1)
                         statut_paiement = st.selectbox("Statut Paiement", ["Non Payé", "Payé"])
+                        mode_paiement = st.selectbox("Mode de Règlement", MODES_PAIEMENT)
                         rais_s = st.text_area("Raison du séjour", height=60)
                         enom = st.text_input("Employé Responsable", value=st.session_state.get("user_name", ""))
                         etel = st.text_input("Téléphone de l'Employé")
@@ -950,7 +1124,7 @@ else:
                                 "Employe_Tel": etel, "Demarcheur_Nom": "Aucun" if not dnom else dnom, 
                                 "Demarcheur_Tel": "Aucun" if not dtel else dtel, "Montant_Total": total, 
                                 "Commission": comm, "Mois": dent.strftime("%m-%Y"), "Statut": "En cours",
-                                "Paiement": statut_paiement
+                                "Paiement": statut_paiement, "Mode_Paiement": mode_paiement
                             }
                             if sauver(data, "sejours"): 
                                 st.success("Enregistrement réussi !")
@@ -964,12 +1138,7 @@ else:
                 with st.form(f"maint_form_{selected_app}"):
                     rais_m = st.text_area("Observations / Motifs de blocage", height=120, placeholder="Ex: Panne climatisation...")
                     if st.form_submit_button("Bloquer pour Maintenance 🛠️", use_container_width=True):
-                        res = st.session_state.api_session.patch(
-                            f"{CONFIG['API_URL']}/Appartement/{selected_app}?sheet=maintenance", 
-                            json={"data": {"Statut": "Inaccessible", "Raison": rais_m}}
-                        )
-                        if res.status_code not in [200, 204]:
-                            sauver({"Appartement": selected_app, "Statut": "Inaccessible", "Raison": rais_m}, "maintenance")
+                        actualiser_maintenance(selected_app, "Inaccessible", rais_m)
                         st.success(f"{selected_app} bloqué pour maintenance.")
                         st.cache_data.clear()
                         import time as time_mod
@@ -981,11 +1150,9 @@ else:
         st.header("Nouvelle Fiche Client")
         libres = [a for a in CONFIG["APPARTEMENTS"] if a not in bloques and a not in occupes]
         
-        # Si un appartement a été cliqué depuis le dashboard, on le présélectionne
         idx_appart = 0
         if st.session_state.appart_cible and st.session_state.appart_cible in libres:
             idx_appart = libres.index(st.session_state.appart_cible)
-            # On affiche un petit rappel
             st.info(f"Logement pré-attribué depuis le Dashboard : **{st.session_state.appart_cible}**")
             
         if not libres: 
@@ -1011,6 +1178,7 @@ else:
                     nuits = st.number_input("Nombre de Nuits *", min_value=1, step=1)
                     app = st.selectbox("Appartement Attribué", libres, index=idx_appart)
                     statut_paiement = st.selectbox("Statut Paiement", ["Non Payé", "Payé"])
+                    mode_paiement = st.selectbox("Mode de Règlement", MODES_PAIEMENT)
 
                 st.subheader("Acteurs du Dossier")
                 c_act1, c_act2 = st.columns(2)
@@ -1030,7 +1198,6 @@ else:
                         dsor = dent + timedelta(days=nuits)
                         total = nuits * CONFIG["PRIX_NUITEE"]
                         comm = (total * 0.1) if dnom else 0
-                        # Identifiant Propre
                         nouvel_id = f"VIP-{uuid.uuid4().hex[:6].upper()}"
                         
                         tel_complet = f"{indicatif}{tel}".replace(" ", "")
@@ -1041,12 +1208,11 @@ else:
                             "Employe_Tel": etel, "Demarcheur_Nom": "Aucun" if not dnom else dnom, 
                             "Demarcheur_Tel": "Aucun" if not dtel else dtel, "Montant_Total": total, 
                             "Commission": comm, "Mois": dent.strftime("%m-%Y"), "Statut": "En cours",
-                            "Paiement": statut_paiement
+                            "Paiement": statut_paiement, "Mode_Paiement": mode_paiement
                         }
                         
                         if sauver(data, "sejours"): 
                             st.toast("Enregistrement réussi !", icon="✅")
-                            # Réinitialiser la présélection après un succès
                             st.session_state.appart_cible = None 
                             st.cache_data.clear()
                             st.rerun()
@@ -1060,14 +1226,11 @@ else:
         if df_sejours.empty:
             st.info("Aucun séjour enregistré pour le moment.")
         else:
-            # Tri par date de création/entrée (le plus récent en premier)
             if "Date_Entree" in df_sejours.columns:
                 df_sejours = df_sejours.sort_values(by="Date_Entree", ascending=False)
             
-            # Barre de recherche
             search_query = st.text_input("🔍 Rechercher par Nom de client, Téléphone ou Appartement :", "")
             
-            # Filtrage
             df_filtered = df_sejours.copy()
             if search_query:
                 query_lower = search_query.lower()
@@ -1077,7 +1240,6 @@ else:
                     df_filtered["Appartement"].astype(str).str.lower().str.contains(query_lower)
                 ]
             
-            # Sélection du séjour
             st.write("---")
             if df_filtered.empty:
                 st.warning("Aucun résultat pour cette recherche.")
@@ -1100,14 +1262,14 @@ else:
                     st.write("---")
                     st.subheader(f"Détails de : {selected_row.get('Client_Nom', '')}")
                     
-                    # Section PDF Reçu Rapide
                     info_recu = {
                         "client": str(selected_row.get("Client_Nom", "")),
                         "tel": str(selected_row.get("Tel_Client", "")),
                         "debut": str(selected_row.get("Date_Entree", "")),
                         "fin": str(selected_row.get("Date_Sortie", "")),
                         "montant": float(selected_row.get("Montant_Total", 0) or 0),
-                        "paiement": str(selected_row.get("Paiement", "Non Payé"))
+                        "paiement": str(selected_row.get("Paiement", "Non Payé")),
+                        "mode_paiement": str(selected_row.get("Mode_Paiement", "Espèces"))
                     }
                     pdf_bytes = generer_recu_pdf(info_recu, str(selected_row.get("Appartement", "")))
                     st.download_button(
@@ -1118,10 +1280,8 @@ else:
                         type="primary"
                     )
                     
-                    # Formulaire d'édition
                     with st.expander("✏️ Modifier les informations de ce séjour", expanded=False):
                         with st.form(f"edit_form_{selected_id}"):
-                            # Pré-remplissage avec gestion sécurisée des dates
                             try: d_entree_val = datetime.strptime(str(selected_row.get("Date_Entree")), "%Y-%m-%d").date()
                             except: d_entree_val = date.today()
                             
@@ -1131,7 +1291,6 @@ else:
                             try: d_sortie_val = datetime.strptime(str(selected_row.get("Date_Sortie")), "%Y-%m-%d").date()
                             except: d_sortie_val = date.today()
                             
-                            # Calcul nuits basé sur l'actuel
                             delta = (d_sortie_val - d_entree_val).days
                             nuits_val = max(1, delta)
                             
@@ -1152,11 +1311,12 @@ else:
                                 app_list = CONFIG["APPARTEMENTS"]
                                 cur_app = str(selected_row.get("Appartement", app_list[0]))
                                 e_app = st.selectbox("Appartement", app_list, index=app_list.index(cur_app) if cur_app in app_list else 0)
-                                # On autorise la modification du montant total, utile si erreur
                                 m_tot_val = float(selected_row.get("Montant_Total", e_nuits * CONFIG["PRIX_NUITEE"]) or (e_nuits * CONFIG["PRIX_NUITEE"]))
                                 e_montant = st.number_input("Montant Total (F CFA)", value=int(m_tot_val), step=1000)
                                 val_paiement = str(selected_row.get("Paiement", "Non Payé")).lower()
-                                e_paiement = st.selectbox("Statut Paiement", ["Non Payé", "Payé"], index=1 if val_paiement == "payé" or val_paiement == "paye" else 0)
+                                e_paiement = st.selectbox("Statut Paiement", ["Non Payé", "Payé"], index=1 if val_paiement in ["payé", "paye"] else 0)
+                                cur_mode_h = str(selected_row.get("Mode_Paiement", "Espèces"))
+                                e_mode_p = st.selectbox("Mode de Règlement", MODES_PAIEMENT, index=MODES_PAIEMENT.index(cur_mode_h) if cur_mode_h in MODES_PAIEMENT else 0)
                                 e_statut = st.selectbox("Statut Séjour", ["En cours", "Terminé"], index=1 if str(selected_row.get("Statut", "En cours")).lower() == "terminé" else 0)
 
                             st.write("---")
@@ -1178,22 +1338,15 @@ else:
                                     "Date_Entree": str(e_dent), "Date_Sortie": str(dsor_edit), "Raison": e_rais, 
                                     "Appartement": e_app, "Employe_Nom": e_enom, 
                                     "Demarcheur_Nom": e_dnom, "Montant_Total": e_montant, 
-                                    "Commission": e_comm, "Statut": e_statut, "Paiement": e_paiement
+                                    "Commission": e_comm, "Statut": e_statut, "Paiement": e_paiement,
+                                    "Mode_Paiement": e_mode_p
                                 }
-                                
-                                res = st.session_state.api_session.patch(
-                                    f"{CONFIG['API_URL']}/id/{selected_id}?sheet=sejours",
-                                    json={"data": updated_data}
-                                )
-                                
-                                if res.status_code in [200, 201, 204] or "updated" in res.text.lower():
-                                    st.success("✅ Modifications enregistrées avec succès !")
-                                    st.cache_data.clear()
-                                    import time as time_mod
-                                    time_mod.sleep(1.5)
-                                    st.rerun()
-                                else:
-                                    st.error("❌ Erreur lors de la mise à jour.")
+                                patch_sejour(selected_id, updated_data)
+                                st.success("✅ Modifications enregistrées avec succès !")
+                                st.cache_data.clear()
+                                import time as time_mod
+                                time_mod.sleep(1.5)
+                                st.rerun()
 
     # --- 4. DEPENSES & MAINTENANCE ---
     elif st.session_state.page_active == "🛠️ Dépenses & Maintenance":
@@ -1209,7 +1362,6 @@ else:
                     mont = st.number_input("Montant Consommé (F) *", min_value=1, step=500)
                 with col_dcf2:
                     cible = st.selectbox("Cible de la dépense", ["Général (Fond de Caisse)"] + CONFIG["APPARTEMENTS"])
-                    # Cacher le bouton technique
                     submit_dep = st.form_submit_button("Décaisser les Fonds 💸")
                 
                 if submit_dep:
@@ -1231,15 +1383,12 @@ else:
                 rais_m = st.text_area("Observations / Motifs", height=110, placeholder="Ex: Climatiseur abîmé par l'ancien locataire. Technicien commandé.")
             
             if st.button("Actualiser la Maintenance 🛠️", use_container_width=True):
-                res = st.session_state.api_session.patch(f"{CONFIG['API_URL']}/Appartement/{app_m}?sheet=maintenance", json={"data": {"Statut": stat_m, "Raison": rais_m}})
-                if res.status_code not in [200, 204]:
-                    sauver({"Appartement": app_m, "Statut": stat_m, "Raison": rais_m}, "maintenance")
-                
+                actualiser_maintenance(app_m, stat_m, rais_m)
                 st.toast(f"Statut technique de {app_m} mis à jour.", icon="🔧")
                 st.cache_data.clear()
                 st.rerun()
 
-    # --- 4. ADMINISTRATION ---
+    # --- 5. ADMINISTRATION ---
     elif st.session_state.page_active == "⚙️ ADMINISTRATION":
         if st.session_state.role != "admin": 
             st.error("⛔ Zone Accès Réservé à la Direction.")
@@ -1259,13 +1408,13 @@ else:
                 with c_warn:
                     if st.button("SUPPRIMER L'ENTRÉE SÉLECTIONNÉE 🗑️", type="primary"):
                         if supprimer_ligne(onglet, id_col, sel): 
-                            st.toast("Ligne définitivement supprimée de SheetDB.", icon="✅")
+                            st.toast("Ligne définitivement supprimée.", icon="✅")
                             st.cache_data.clear()
                             st.rerun()
             else:
                 st.info(f"La table '{onglet}' est actuellement vide.")
 
-    # --- 5. RAPPORT PDF ---
+    # --- 6. RAPPORT PDF ---
     elif st.session_state.page_active == "📈 RAPPORT PDF":
         if st.session_state.role != "admin": 
             st.error("⛔ Zone de comptabilité confidentielle (Direction Uniquement).")
@@ -1275,7 +1424,6 @@ else:
             df_s = charger("sejours")
             df_d = charger("depenses")
             
-            # Fonction pour générer la liste des mois (dynamique)
             mois_set = set()
             if not df_d.empty and "Mois" in df_d.columns:
                 mois_set.update(df_d["Mois"].dropna().unique())
@@ -1286,9 +1434,8 @@ else:
                         d_ent = datetime.strptime(str(row["Date_Entree"]), "%Y-%m-%d").date()
                         d_sor = datetime.strptime(str(row["Date_Sortie"]), "%Y-%m-%d").date()
                         
-                        # Règle du lendemain : une nuit = le jour du checkout
                         curr = d_ent + timedelta(days=1)
-                        if curr > d_sor: curr = d_sor # Cas day-use (entrée = sortie)
+                        if curr > d_sor: curr = d_sor
                         
                         while curr <= d_sor:
                             mois_set.add(curr.strftime("%m-%Y"))
@@ -1323,7 +1470,6 @@ else:
                                 d_ent = datetime.strptime(str(row["Date_Entree"]), "%Y-%m-%d").date()
                                 d_sor = datetime.strptime(str(row["Date_Sortie"]), "%Y-%m-%d").date()
                                 
-                                # Calcul des nuits dans CE mois
                                 nuits_ce_mois = 0
                                 curr = d_ent + timedelta(days=1)
                                 if curr > d_sor: curr = d_sor
@@ -1347,7 +1493,7 @@ else:
                                     comm += comm_ce_mois
                                     
                                     val_paiement = str(row.get("Paiement", "")).lower()
-                                    est_paye = (val_paiement == "payé" or val_paiement == "paye")
+                                    est_paye = (val_paiement in ["payé", "paye"])
                                     
                                     if est_paye:
                                         ca_paye += montant_ce_mois
@@ -1362,14 +1508,13 @@ else:
                                         "Montant": montant_ce_mois
                                     })
                             except:
-                                # Fallback pour les anciennes données ou erreurs de date
                                 if str(row.get("Mois")) == sel_m:
                                     m_val = float(row.get("Montant_Total", 0) or 0)
                                     c_val = float(row.get("Commission", 0) or 0)
                                     ca += m_val
                                     comm += c_val
                                     val_paiement = str(row.get("Paiement", "")).lower()
-                                    est_paye = (val_paiement == "payé" or val_paiement == "paye")
+                                    est_paye = (val_paiement in ["payé", "paye"])
                                     if est_paye: ca_paye += m_val
                                     else: ca_attente += m_val
                                     
@@ -1421,7 +1566,7 @@ else:
             else:
                 st.info("Aucune donnée disponible pour le moment.")
 
-    # --- 6. MESSAGERIE INTERNE (CHAT) ---
+    # --- 7. MESSAGERIE INTERNE (CHAT) ---
     elif st.session_state.page_active == "💬 Messagerie Interne":
         st.header("💬 Messagerie Équipe")
         st.markdown("Communiquez en temps réel avec la Direction et les Employés. Vous pouvez supprimer vos messages si besoin.")
