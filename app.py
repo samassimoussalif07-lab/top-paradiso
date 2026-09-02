@@ -407,6 +407,7 @@ def obtenir_etats() -> tuple[dict, dict]:
                     "client": str(row.get("Client_Nom", "")),
                     "montant": float(row.get("Montant_Total", 0) or 0),
                     "tel": str(row.get("Tel_Client", "")),
+                    "employe_nom": str(row.get("Employe_Nom", "")),
                     "retard": retard,
                     "depart_aujourdhui": depart_aujourdhui
                 }
@@ -718,6 +719,63 @@ else:
     )
     
     bloques, occupes = obtenir_etats()
+    
+    # --- RAPPEL SONORE (10 SECONDES TOUTES LES MINUTES À PARTIR DE 10H55) ---
+    now_bf = datetime.now(CONFIG["TZ_BF"])
+    user_curr = str(st.session_state.get("user_name", "")).strip().lower()
+    
+    alertes_sonores = []
+    for app_name, info in occupes.items():
+        is_ending_soon = (info.get("retard") or (info.get("depart_aujourdhui") and now_bf.time() >= time(10, 55)))
+        emp_stay = str(info.get("employe_nom", "")).strip().lower()
+        
+        is_assigned = (not emp_stay or emp_stay == user_curr or user_curr in emp_stay or emp_stay in user_curr or st.session_state.role == "admin")
+        
+        if is_ending_soon and is_assigned:
+            alertes_sonores.append((app_name, info))
+            
+    if alertes_sonores:
+        for app_name, info in alertes_sonores:
+            st.error(f"🔔 **ALERTE RAPPEL 10H55 (ÉCHÉANCE CHECK-OUT)** : Le séjour de **{info['client']}** ({app_name}) expire à **{info['fin']}**. Veuillez mettre fin au séjour ou le prolonger !")
+        
+        html_son = """
+        <script>
+        (function() {
+            try {
+                var audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                var playBeep = function(delay, freq) {
+                    setTimeout(function() {
+                        if (audioCtx.state === 'suspended') {
+                            audioCtx.resume();
+                        }
+                        var osc = audioCtx.createOscillator();
+                        var gain = audioCtx.createGain();
+                        osc.type = 'sine';
+                        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                        gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+                        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+                        osc.connect(gain);
+                        gain.connect(audioCtx.destination);
+                        osc.start();
+                        osc.stop(audioCtx.currentTime + 0.5);
+                    }, delay);
+                };
+
+                [0, 1500, 3000, 4500, 6000, 7500, 9000].forEach(function(d) {
+                    playBeep(d, 880);
+                    playBeep(d + 250, 1174.66);
+                });
+            } catch(e) {
+                console.log("Erreur audio:", e);
+            }
+        })();
+
+        setTimeout(function(){
+            window.location.reload();
+        }, 60000);
+        </script>
+        """
+        st.components.v1.html(html_son, height=0)
     
     st.sidebar.image("https://img.icons8.com/color/96/city-buildings.png", width=64)
     st.sidebar.markdown(f"**Rôle Actif:** `{st.session_state.role.upper()}`")
@@ -1576,7 +1634,7 @@ else:
         
         with chat_container:
             if not messages:
-                st.info("La discussion est vide. Envoyez le premier message !")
+                st.info("La discussion meublée est vide. Envoyez le premier message !")
             
             for msg in messages:
                 is_admin = (msg["sender"] == "admin")
