@@ -9,8 +9,13 @@ import urllib.parse
 import json
 import os
 import sqlite3
-import plotly.express as px
-import plotly.graph_objects as go
+try:
+    import plotly.express as px
+    import plotly.graph_objects as go
+    HAS_PLOTLY = True
+except ImportError:
+    HAS_PLOTLY = False
+
 
 
 # --- CONFIGURATION INITIALE ---
@@ -816,7 +821,7 @@ def generer_registre_police_pdf(df_sejours: pd.DataFrame, periode_label: str) ->
         
     pdf.ln(8)
     pdf.set_font("Arial", "I", 8)
-    pdf.cell(0, 5, clean_txt(f"Registre certifié conforme et transmis aux autorités de police le {datetime.now(CONFIG['TZ_BF']).strftime('%d/%m/%Y à %H:%M')}."), align="R")
+    pdf.cell(0, 5, clean_txt(f"Registre certifié conforme et transmitted aux autorités de police le {datetime.now(CONFIG['TZ_BF']).strftime('%d/%m/%Y à %H:%M')}."), align="R")
     
     return pdf.output(dest="S").encode('latin-1', 'replace')
 
@@ -1436,7 +1441,6 @@ else:
                     statut_paiement = st.selectbox("Statut Paiement", ["Non Payé", "Payé"])
                     mode_paiement = st.selectbox("Mode de Règlement", MODES_PAIEMENT)
 
-                st.subheader("Acteurs du Dossier")
                 c_act1, c_act2 = st.columns(2)
                 with c_act1:
                     rais_s = st.text_area("Raison du séjour", height=100)
@@ -1519,7 +1523,8 @@ else:
                 ]
             
             st.write("---")
-            with st.expander("控制 Registre de Police Officiel (Pour Autorités Locales)", expanded=False):
+            with st.expander("🚓 Exportation du Registre de Police Officiel (Pour Autorités Locales)", expanded=False):
+
                 st.markdown("Générez et téléchargez le registre officiel des clients pour transmission périodique à la Police Nationale / Commissariat.")
                 
                 pol_col1, pol_col2 = st.columns(2)
@@ -1888,98 +1893,101 @@ else:
                     st.markdown("---")
                     st.subheader("📊 Dashboard Visuel & Analyse de Performance")
 
-                    chart_col1, chart_col2 = st.columns(2)
-                    
-                    # 1. Évolution du CA mois par mois
-                    with chart_col1:
-                        st.markdown("##### 📈 Évolution du CA mois par mois")
-                        if not df_s.empty:
-                            ca_mois_list = []
-                            for _, r in df_s.iterrows():
-                                m_val = str(r.get("Mois", "")).strip()
-                                m_total = float(r.get("Montant_Total", 0) or 0)
-                                p_stat = str(r.get("Paiement", "Non Payé")).strip().lower()
-                                est_p = "Payé" if p_stat in ["payé", "paye"] else "En Attente"
-                                if m_val:
-                                    ca_mois_list.append({
-                                        "Mois": m_val,
-                                        "Montant": m_total,
-                                        "Statut": est_p
-                                    })
-                            if ca_mois_list:
-                                df_ca_chart = pd.DataFrame(ca_mois_list)
-                                try:
-                                    df_ca_chart["Date_Order"] = df_ca_chart["Mois"].apply(lambda x: datetime.strptime(x, "%m-%Y") if len(str(x).split("-"))==2 else datetime.min)
-                                    df_ca_chart = df_ca_chart.sort_values(by="Date_Order")
-                                except Exception:
-                                    pass
-                                
-                                df_ca_grouped = df_ca_chart.groupby(["Mois", "Statut"], as_index=False)["Montant"].sum()
-                                fig_ca = px.bar(
-                                    df_ca_grouped,
-                                    x="Mois",
-                                    y="Montant",
-                                    color="Statut",
-                                    color_discrete_map={"Payé": "#2ecc71", "En Attente": "#e74c3c"},
-                                    labels={"Montant": "CA (F CFA)", "Mois": "Période (Mois)"},
-                                    barmode="stack"
-                                )
-                                fig_ca.update_layout(margin=dict(l=20, r=20, t=30, b=20), height=320, legend_title_text="Statut")
-                                st.plotly_chart(fig_ca, use_container_width=True)
-                            else:
-                                st.info("Aucune donnée de CA disponible pour le graphique.")
-                        else:
-                            st.info("Aucune donnée de séjour enregistrée.")
-
-                    # 2. Rentabilité par Appartement
-                    with chart_col2:
-                        st.markdown("##### 🏆 Rentabilité par Appartement (CA Total)")
-                        if not df_s.empty:
-                            df_app_perf = df_s.groupby("Appartement", as_index=False).agg(
-                                CA_Total=("Montant_Total", lambda x: pd.to_numeric(x, errors="coerce").fillna(0).sum()),
-                                Nombre_Sejours=("id", "count")
-                            )
-                            if not df_app_perf.empty:
-                                fig_app = px.bar(
-                                    df_app_perf,
-                                    x="Appartement",
-                                    y="CA_Total",
-                                    text="CA_Total",
-                                    color="Appartement",
-                                    color_discrete_sequence=px.colors.qualitative.Set2,
-                                    labels={"CA_Total": "CA Total (F CFA)", "Appartement": "Appartement"}
-                                )
-                                fig_app.update_traces(texttemplate='%{text:,.0f} F', textposition='outside')
-                                fig_app.update_layout(margin=dict(l=20, r=20, t=30, b=20), height=320, showlegend=False)
-                                st.plotly_chart(fig_app, use_container_width=True)
-                            else:
-                                st.info("Aucune donnée d'appartement disponible.")
-                        else:
-                            st.info("Aucun séjour enregistré.")
-
-                    # 3. Répartition des Modes de Paiement
-                    st.markdown("##### 💳 Répartition des Modes de Paiement")
-                    if not df_s.empty and "Mode_Paiement" in df_s.columns:
-                        df_pm = df_s.groupby("Mode_Paiement", as_index=False).agg(
-                            Montant=("Montant_Total", lambda x: pd.to_numeric(x, errors="coerce").fillna(0).sum()),
-                            Nombre=("id", "count")
-                        )
-                        df_pm = df_pm[df_pm["Montant"] > 0]
-                        if not df_pm.empty:
-                            fig_pm = px.pie(
-                                df_pm,
-                                values="Montant",
-                                names="Mode_Paiement",
-                                hole=0.4,
-                                color_discrete_sequence=px.colors.sequential.RdBu
-                            )
-                            fig_pm.update_traces(textinfo="percent+label+value", valueformat=",.0f")
-                            fig_pm.update_layout(margin=dict(l=20, r=20, t=20, b=20), height=340)
-                            st.plotly_chart(fig_pm, use_container_width=True)
-                        else:
-                            st.info("Aucun montant enregistré par mode de paiement.")
+                    if not HAS_PLOTLY:
+                        st.warning("⚠️ **Module Plotly non encore chargé par Streamlit Cloud**. Veuillez vérifier que votre fichier `requirements.txt` contient `plotly` puis cliquer sur **Reboot app** dans Streamlit Cloud.")
                     else:
-                        st.info("Données sur les modes de paiement indisponibles.")
+                        chart_col1, chart_col2 = st.columns(2)
+
+                        # 1. Évolution du CA mois par mois
+                        with chart_col1:
+                            st.markdown("##### 📈 Évolution du CA mois par mois")
+                            if not df_s.empty:
+                                ca_mois_list = []
+                                for _, r in df_s.iterrows():
+                                    m_val = str(r.get("Mois", "")).strip()
+                                    m_total = float(r.get("Montant_Total", 0) or 0)
+                                    p_stat = str(r.get("Paiement", "Non Payé")).strip().lower()
+                                    est_p = "Payé" if p_stat in ["payé", "paye"] else "En Attente"
+                                    if m_val:
+                                        ca_mois_list.append({
+                                            "Mois": m_val,
+                                            "Montant": m_total,
+                                            "Statut": est_p
+                                        })
+                                if ca_mois_list:
+                                    df_ca_chart = pd.DataFrame(ca_mois_list)
+                                    try:
+                                        df_ca_chart["Date_Order"] = df_ca_chart["Mois"].apply(lambda x: datetime.strptime(x, "%m-%Y") if len(str(x).split("-"))==2 else datetime.min)
+                                        df_ca_chart = df_ca_chart.sort_values(by="Date_Order")
+                                    except Exception:
+                                        pass
+                                    
+                                    df_ca_grouped = df_ca_chart.groupby(["Mois", "Statut"], as_index=False)["Montant"].sum()
+                                    fig_ca = px.bar(
+                                        df_ca_grouped,
+                                        x="Mois",
+                                        y="Montant",
+                                        color="Statut",
+                                        color_discrete_map={"Payé": "#2ecc71", "En Attente": "#e74c3c"},
+                                        labels={"Montant": "CA (F CFA)", "Mois": "Période (Mois)"},
+                                        barmode="stack"
+                                    )
+                                    fig_ca.update_layout(margin=dict(l=20, r=20, t=30, b=20), height=320, legend_title_text="Statut")
+                                    st.plotly_chart(fig_ca, use_container_width=True)
+                                else:
+                                    st.info("Aucune donnée de CA disponible pour le graphique.")
+                            else:
+                                st.info("Aucune donnée de séjour enregistrée.")
+
+                        # 2. Rentabilité par Appartement
+                        with chart_col2:
+                            st.markdown("##### 🏆 Rentabilité par Appartement (CA Total)")
+                            if not df_s.empty:
+                                df_app_perf = df_s.groupby("Appartement", as_index=False).agg(
+                                    CA_Total=("Montant_Total", lambda x: pd.to_numeric(x, errors="coerce").fillna(0).sum()),
+                                    Nombre_Sejours=("id", "count")
+                                )
+                                if not df_app_perf.empty:
+                                    fig_app = px.bar(
+                                        df_app_perf,
+                                        x="Appartement",
+                                        y="CA_Total",
+                                        text="CA_Total",
+                                        color="Appartement",
+                                        color_discrete_sequence=px.colors.qualitative.Set2,
+                                        labels={"CA_Total": "CA Total (F CFA)", "Appartement": "Appartement"}
+                                    )
+                                    fig_app.update_traces(texttemplate='%{text:,.0f} F', textposition='outside')
+                                    fig_app.update_layout(margin=dict(l=20, r=20, t=30, b=20), height=320, showlegend=False)
+                                    st.plotly_chart(fig_app, use_container_width=True)
+                                else:
+                                    st.info("Aucune donnée d'appartement disponible.")
+                            else:
+                                st.info("Aucun séjour enregistré.")
+
+                        # 3. Répartition des Modes de Paiement
+                        st.markdown("##### 💳 Répartition des Modes de Paiement")
+                        if not df_s.empty and "Mode_Paiement" in df_s.columns:
+                            df_pm = df_s.groupby("Mode_Paiement", as_index=False).agg(
+                                Montant=("Montant_Total", lambda x: pd.to_numeric(x, errors="coerce").fillna(0).sum()),
+                                Nombre=("id", "count")
+                            )
+                            df_pm = df_pm[df_pm["Montant"] > 0]
+                            if not df_pm.empty:
+                                fig_pm = px.pie(
+                                    df_pm,
+                                    values="Montant",
+                                    names="Mode_Paiement",
+                                    hole=0.4,
+                                    color_discrete_sequence=px.colors.sequential.RdBu
+                                )
+                                fig_pm.update_traces(textinfo="percent+label+value", valueformat=",.0f")
+                                fig_pm.update_layout(margin=dict(l=20, r=20, t=20, b=20), height=340)
+                                st.plotly_chart(fig_pm, use_container_width=True)
+                            else:
+                                st.info("Aucun montant enregistré par mode de paiement.")
+                        else:
+                            st.info("Données sur les modes de paiement indisponibles.")
 
                         
                     st.markdown("---")
