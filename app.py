@@ -709,12 +709,12 @@ def generer_fiche_police_pdf(info: dict) -> bytes:
 
     # En-tête officiel
     pdf.set_font("Arial", "B", 10)
-    pdf.cell(100, 5, clean_txt("RÉPUBLIQUE DU BURKINA FASO"), ln=False)
+    pdf.cell(100, 5, clean_txt("BURKINA FASO"), ln=False)
     pdf.cell(90, 5, clean_txt("RÉSIDENCE PARADISO"), align="R", ln=True)
     pdf.set_font("Arial", "I", 9)
-    pdf.cell(100, 5, clean_txt("Unité - Progrès - Justice"), ln=False)
+    pdf.cell(100, 5, clean_txt("La Patrie ou la Mort nous Vaincrons"), ln=False)
     pdf.cell(90, 5, clean_txt("Ouagadougou, Burkina Faso"), align="R", ln=True)
-    pdf.cell(100, 5, clean_txt("MINISTÈRE DE LA SÉCURITÉ INTÉRIEURE"), ln=False)
+    pdf.cell(100, 5, clean_txt("SÉCURITÉ INTÉRIEURE"), ln=False)
     pdf.cell(90, 5, clean_txt("Tél : +226 64 35 35 50"), align="R", ln=True)
     pdf.cell(100, 5, clean_txt("DIRECTION DE LA POLICE NATIONALE"), ln=True)
     
@@ -730,7 +730,7 @@ def generer_fiche_police_pdf(info: dict) -> bytes:
     pdf.cell(0, 10, clean_txt("FICHE INDIVIDUELLE DE POLICE - DÉCLARATION D'HÉBERGEMENT"), ln=True, align="C")
     pdf.set_font("Arial", "I", 9)
     pdf.set_text_color(100, 100, 100)
-    pdf.cell(0, 5, clean_txt("(Article de loi sur l'immatriculation des clients de passage dans les établissements hôteliers)"), ln=True, align="C")
+    pdf.cell(0, 5, clean_txt("(L'immatriculation des clients de passage dans les établissements hôteliers)"), ln=True, align="C")
     pdf.ln(8)
     
     # Tableau des informations client
@@ -787,7 +787,7 @@ def generer_registre_police_pdf(df_sejours: pd.DataFrame, periode_label: str) ->
 
     # En-tête Officiel Police Registre
     pdf.set_font("Arial", "B", 11)
-    pdf.cell(0, 6, clean_txt("RÉPUBLIQUE DU BURKINA FASO - MINISTÈRE DE LA SÉCURITÉ INTÉRIEURE"), ln=True, align="C")
+    pdf.cell(0, 6, clean_txt("BURKINA FASO - SÉCURITÉ INTÉRIEURE"), ln=True, align="C")
     pdf.set_font("Arial", "B", 14)
     pdf.cell(0, 8, clean_txt(f"REGISTRE OFFICIEL DE POLICE DES CLIENTS DE PASSAGE ({periode_label.upper()})"), ln=True, align="C")
     pdf.set_font("Arial", "I", 10)
