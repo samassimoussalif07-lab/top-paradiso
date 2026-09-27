@@ -2,5 +2,6 @@ streamlit
 pandas
 requests
 fpdf
-extra-streamlit-components
 pytz
+extra-streamlit-components
+plotly
