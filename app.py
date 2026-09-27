@@ -9,6 +9,9 @@ import urllib.parse
 import json
 import os
 import sqlite3
+import plotly.express as px
+import plotly.graph_objects as go
+
 
 # --- CONFIGURATION INITIALE ---
 st.set_page_config(page_title="Résidence PARADISO - Gestion", page_icon="🏢", layout="wide")
@@ -29,6 +32,10 @@ MOIS_FR = {
 }
 
 DB_PATH = "residence_data.db"
+ID_SCANS_DIR = "id_scans"
+
+if not os.path.exists(ID_SCANS_DIR):
+    os.makedirs(ID_SCANS_DIR)
 
 # --- INITIALISATION BASE DE DONNÉES SQLITE LOCALE (OFFLINE-FIRST) ---
 def init_sqlite_db():
@@ -56,9 +63,15 @@ def init_sqlite_db():
             Mois TEXT,
             Statut TEXT,
             Paiement TEXT,
-            Mode_Paiement TEXT
+            Mode_Paiement TEXT,
+            Piece_Scan_Path TEXT
         )
     ''')
+    try:
+        c.execute("ALTER TABLE sejours ADD COLUMN Piece_Scan_Path TEXT")
+    except Exception:
+        pass
+
     c.execute('''
         CREATE TABLE IF NOT EXISTS depenses (
             id TEXT PRIMARY KEY,
@@ -80,6 +93,7 @@ def init_sqlite_db():
     conn.close()
 
 init_sqlite_db()
+
 
 # --- SESSION API OPTIMISEE ---
 if "api_session" not in st.session_state:
@@ -179,8 +193,8 @@ def sync_sqlite_from_df(df: pd.DataFrame, onglet: str):
                     INSERT OR REPLACE INTO sejours 
                     (id, Client_Nom, Date_Naissance, Provenance, Piece_Type, Piece_Num, Tel_Client,
                      Date_Entree, Date_Sortie, Raison, Appartement, Employe_Nom, Employe_Tel,
-                     Demarcheur_Nom, Demarcheur_Tel, Montant_Total, Commission, Mois, Statut, Paiement, Mode_Paiement)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     Demarcheur_Nom, Demarcheur_Tel, Montant_Total, Commission, Mois, Statut, Paiement, Mode_Paiement, Piece_Scan_Path)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     id_val,
                     str(row_dict.get("Client_Nom", "")),
@@ -202,8 +216,10 @@ def sync_sqlite_from_df(df: pd.DataFrame, onglet: str):
                     str(row_dict.get("Mois", "")),
                     str(row_dict.get("Statut", "")),
                     str(row_dict.get("Paiement", "")),
-                    str(row_dict.get("Mode_Paiement", "Espèces"))
+                    str(row_dict.get("Mode_Paiement", "Espèces")),
+                    str(row_dict.get("Piece_Scan_Path", ""))
                 ))
+
         elif onglet == "depenses":
             for _, row in df.iterrows():
                 row_dict = row.to_dict()
@@ -678,6 +694,132 @@ def generer_recu_pdf(info: dict, appart: str) -> bytes:
         pdf.image("signature.jpg", x=150, y=y_sig + 5, w=40)
         
     return pdf.output(dest="S").encode('latin-1', 'replace')
+
+def generer_fiche_police_pdf(info: dict) -> bytes:
+    pdf = FPDF()
+    pdf.add_page()
+    
+    def clean_txt(text):
+        return str(text).encode('latin-1', 'replace').decode('latin-1')
+
+    # En-tête officiel
+    pdf.set_font("Arial", "B", 10)
+    pdf.cell(100, 5, clean_txt("RÉPUBLIQUE DU BURKINA FASO"), ln=False)
+    pdf.cell(90, 5, clean_txt("RÉSIDENCE PARADISO"), align="R", ln=True)
+    pdf.set_font("Arial", "I", 9)
+    pdf.cell(100, 5, clean_txt("Unité - Progrès - Justice"), ln=False)
+    pdf.cell(90, 5, clean_txt("Ouagadougou, Burkina Faso"), align="R", ln=True)
+    pdf.cell(100, 5, clean_txt("MINISTÈRE DE LA SÉCURITÉ INTÉRIEURE"), ln=False)
+    pdf.cell(90, 5, clean_txt("Tél : +226 64 35 35 50"), align="R", ln=True)
+    pdf.cell(100, 5, clean_txt("DIRECTION DE LA POLICE NATIONALE"), ln=True)
+    
+    pdf.ln(5)
+    pdf.set_draw_color(44, 62, 80)
+    pdf.set_linewidth(0.8)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.ln(8)
+    
+    # Titre du document
+    pdf.set_font("Arial", "B", 14)
+    pdf.set_text_color(44, 62, 80)
+    pdf.cell(0, 10, clean_txt("FICHE INDIVIDUELLE DE POLICE - DÉCLARATION D'HÉBERGEMENT"), ln=True, align="C")
+    pdf.set_font("Arial", "I", 9)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 5, clean_txt("(Article de loi sur l'immatriculation des clients de passage dans les établissements hôteliers)"), ln=True, align="C")
+    pdf.ln(8)
+    
+    # Tableau des informations client
+    pdf.set_draw_color(189, 195, 199)
+    pdf.set_linewidth(0.2)
+    pdf.set_font("Arial", "B", 10)
+    pdf.set_fill_color(236, 240, 241)
+    pdf.set_text_color(0, 0, 0)
+    
+    fields = [
+        ("Nom & Prénom(s) du Client", str(info.get("Client_Nom", ""))),
+        ("Date de Naissance", str(info.get("Date_Naissance", ""))),
+        ("Provenance / Nationalité", str(info.get("Provenance", ""))),
+        ("Type de Pièce d'Identité", str(info.get("Piece_Type", ""))),
+        ("Numéro de la Pièce d'Identité", str(info.get("Piece_Num", ""))),
+        ("Numéro Téléphone Client", str(info.get("Tel_Client", ""))),
+        ("Date d'Arrivée (Entrée)", str(info.get("Date_Entree", ""))),
+        ("Date de Départ (Sortie)", str(info.get("Date_Sortie", ""))),
+        ("Appartement Attribué", str(info.get("Appartement", ""))),
+        ("Motif / Raison du Séjour", str(info.get("Raison", "Séjour touristique / professionnel"))),
+        ("Employé ayant enregistré", str(info.get("Employe_Nom", "")))
+    ]
+    
+    w_label, w_val = 70, 120
+    for label, val in fields:
+        pdf.set_font("Arial", "B", 10)
+        pdf.cell(w_label, 8, clean_txt(f" {label}"), border=1, fill=True)
+        pdf.set_font("Arial", "", 10)
+        pdf.cell(w_val, 8, clean_txt(f" {val}"), border=1, ln=True)
+        
+    pdf.ln(12)
+    pdf.set_font("Arial", "I", 9)
+    pdf.cell(0, 5, clean_txt(f"Fiche établie à Ouagadougou le {datetime.now(CONFIG['TZ_BF']).strftime('%d/%m/%Y à %H:%M')}"), ln=True)
+    pdf.ln(10)
+    
+    y_sig = pdf.get_y()
+    pdf.set_font("Arial", "B", 10)
+    pdf.cell(90, 5, clean_txt("Signature du Client :"), ln=False)
+    pdf.cell(90, 5, clean_txt("Cachet & Visa de la Résidence :"), align="R", ln=True)
+    
+    if os.path.exists("signature.png"):
+        pdf.image("signature.png", x=145, y=y_sig + 8, w=40)
+    elif os.path.exists("signature.jpg"):
+        pdf.image("signature.jpg", x=145, y=y_sig + 8, w=40)
+        
+    return pdf.output(dest="S").encode('latin-1', 'replace')
+
+def generer_registre_police_pdf(df_sejours: pd.DataFrame, periode_label: str) -> bytes:
+    pdf = FPDF(orientation='L', unit='mm', format='A4')
+    pdf.add_page()
+    
+    def clean_txt(text):
+        return str(text).encode('latin-1', 'replace').decode('latin-1')
+
+    # En-tête Officiel Police Registre
+    pdf.set_font("Arial", "B", 11)
+    pdf.cell(0, 6, clean_txt("RÉPUBLIQUE DU BURKINA FASO - MINISTÈRE DE LA SÉCURITÉ INTÉRIEURE"), ln=True, align="C")
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 8, clean_txt(f"REGISTRE OFFICIEL DE POLICE DES CLIENTS DE PASSAGE ({periode_label.upper()})"), ln=True, align="C")
+    pdf.set_font("Arial", "I", 10)
+    pdf.cell(0, 6, clean_txt("Établissement : RÉSIDENCE PARADISO (Ouagadougou, Tél: +226 64 35 35 50)"), ln=True, align="C")
+    pdf.ln(5)
+    
+    pdf.set_font("Arial", "B", 9)
+    pdf.set_fill_color(220, 230, 242)
+    
+    cols_w = [45, 25, 30, 25, 35, 30, 25, 25, 37]
+    headers = ["Nom & Prénom Client", "Date Naiss.", "Provenance", "Pièce", "N° Pièce", "Téléphone", "Arrivée", "Départ", "Logement"]
+    
+    for i, h in enumerate(headers):
+        pdf.cell(cols_w[i], 8, clean_txt(h), border=1, align="C", fill=True)
+    pdf.ln()
+    
+    pdf.set_font("Arial", "", 8)
+    if not df_sejours.empty:
+        for _, r in df_sejours.iterrows():
+            pdf.cell(cols_w[0], 7, clean_txt(str(r.get("Client_Nom", ""))[:25]), border=1)
+            pdf.cell(cols_w[1], 7, clean_txt(str(r.get("Date_Naissance", ""))), border=1, align="C")
+            pdf.cell(cols_w[2], 7, clean_txt(str(r.get("Provenance", ""))[:18]), border=1)
+            pdf.cell(cols_w[3], 7, clean_txt(str(r.get("Piece_Type", ""))), border=1, align="C")
+            pdf.cell(cols_w[4], 7, clean_txt(str(r.get("Piece_Num", ""))[:20]), border=1)
+            pdf.cell(cols_w[5], 7, clean_txt(str(r.get("Tel_Client", ""))), border=1, align="C")
+            pdf.cell(cols_w[6], 7, clean_txt(str(r.get("Date_Entree", ""))), border=1, align="C")
+            pdf.cell(cols_w[7], 7, clean_txt(str(r.get("Date_Sortie", ""))), border=1, align="C")
+            pdf.cell(cols_w[8], 7, clean_txt(str(r.get("Appartement", ""))), border=1, align="C", ln=True)
+    else:
+        pdf.cell(sum(cols_w), 10, clean_txt("Aucun client enregistré sur cette période."), border=1, align="C", ln=True)
+        
+    pdf.ln(8)
+    pdf.set_font("Arial", "I", 8)
+    pdf.cell(0, 5, clean_txt(f"Registre certifié conforme et transmis aux autorités de police le {datetime.now(CONFIG['TZ_BF']).strftime('%d/%m/%Y à %H:%M')}."), align="R")
+    
+    return pdf.output(dest="S").encode('latin-1', 'replace')
+
 
 import extra_streamlit_components as stx
 
@@ -1305,6 +1447,13 @@ else:
                     dnom = st.text_input("Nom du Démarcheur (Optionnel)")
                     dtel = st.text_input("Téléphone du Démarcheur")
 
+                st.subheader("📸 Scan / Photo de la Pièce d'Identité (CNI / Passeport)")
+                c_scan1, c_scan2 = st.columns(2)
+                with c_scan1:
+                    scan_cam = st.camera_input("📸 Prendre en photo la CNI / Passeport (Caméra)")
+                with c_scan2:
+                    scan_file = st.file_uploader("📤 Ou importer une photo (JPG, PNG)", type=["png", "jpg", "jpeg"], key="scan_upl_reg")
+
                 if st.form_submit_button("VALIDER L'ENREGISTREMENT ✅"):
                     if not nom or not tel or not pnum:
                         st.warning("Veuillez remplir les champs obligatoires (*)")
@@ -1314,6 +1463,18 @@ else:
                         comm = (total * 0.1) if dnom else 0
                         nouvel_id = f"VIP-{uuid.uuid4().hex[:6].upper()}"
                         
+                        # Traitement de l'image de la pièce
+                        scan_img = scan_cam or scan_file
+                        piece_path = ""
+                        if scan_img:
+                            scan_filename = f"{nouvel_id}_scan.jpg"
+                            piece_path = os.path.join(ID_SCANS_DIR, scan_filename)
+                            try:
+                                with open(piece_path, "wb") as f_out:
+                                    f_out.write(scan_img.getbuffer())
+                            except Exception:
+                                piece_path = ""
+
                         tel_complet = f"{indicatif}{tel}".replace(" ", "")
                         data = {
                             "id": nouvel_id, "Client_Nom": nom, "Date_Naissance": str(dnais), "Provenance": prov,
@@ -1322,15 +1483,17 @@ else:
                             "Employe_Tel": etel, "Demarcheur_Nom": "Aucun" if not dnom else dnom, 
                             "Demarcheur_Tel": "Aucun" if not dtel else dtel, "Montant_Total": total, 
                             "Commission": comm, "Mois": dent.strftime("%m-%Y"), "Statut": "En cours",
-                            "Paiement": statut_paiement, "Mode_Paiement": mode_paiement
+                            "Paiement": statut_paiement, "Mode_Paiement": mode_paiement,
+                            "Piece_Scan_Path": piece_path
                         }
                         
                         if sauver(data, "sejours"): 
                             notifier_nouvelle_occupation(app, nom, enom, str(dent), str(dsor))
-                            st.toast("Enregistrement réussi !", icon="✅")
+                            st.toast("Enregistrement réussi avec pièce d'identité !", icon="✅")
                             st.session_state.appart_cible = None 
                             st.cache_data.clear()
                             st.rerun()
+
 
     # --- 3. HISTORIQUE ET EDITION CLIENTS ---
     elif st.session_state.page_active == "🗂️ Historique des Séjours":
@@ -1356,6 +1519,40 @@ else:
                 ]
             
             st.write("---")
+            with st.expander("控制 Registre de Police Officiel (Pour Autorités Locales)", expanded=False):
+                st.markdown("Générez et téléchargez le registre officiel des clients pour transmission périodique à la Police Nationale / Commissariat.")
+                
+                pol_col1, pol_col2 = st.columns(2)
+                
+                # Registre PDF
+                registre_police_bytes = generer_registre_police_pdf(df_filtered, "GLOBAL")
+                with pol_col1:
+                    st.download_button(
+                        "📄 Exporter Registre de Police (PDF)",
+                        data=registre_police_bytes,
+                        file_name=f"Registre_Police_Paradiso_{datetime.now().strftime('%Y%m%d')}.pdf",
+                        mime="application/pdf",
+                        type="primary",
+                        use_container_width=True
+                    )
+                
+                # Registre CSV
+                cols_police = ["Client_Nom", "Date_Naissance", "Provenance", "Piece_Type", "Piece_Num", "Tel_Client", "Date_Entree", "Date_Sortie", "Appartement", "Raison", "Employe_Nom"]
+                cols_exist = [c for c in cols_police if c in df_filtered.columns]
+                df_police_export = df_filtered[cols_exist].copy()
+                csv_police_data = df_police_export.to_csv(index=False, encoding='utf-8-sig')
+                
+                with pol_col2:
+                    st.download_button(
+                        "📊 Exporter Registre de Police (CSV Excel)",
+                        data=csv_police_data,
+                        file_name=f"Registre_Police_Paradiso_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                    
+            st.write("---")
+
             if df_filtered.empty:
                 st.warning("Aucun résultat pour cette recherche.")
             else:
@@ -1387,13 +1584,32 @@ else:
                         "mode_paiement": str(selected_row.get("Mode_Paiement", "Espèces"))
                     }
                     pdf_bytes = generer_recu_pdf(info_recu, str(selected_row.get("Appartement", "")))
-                    st.download_button(
-                        "🖨️ Télécharger le Reçu PDF de ce séjour", 
-                        data=pdf_bytes, 
-                        file_name=f"Recu_{selected_row.get('Appartement', '')}_{selected_row.get('Client_Nom', '')}.pdf", 
-                        mime="application/pdf", 
-                        type="primary"
-                    )
+                    police_bytes = generer_fiche_police_pdf(selected_row.to_dict())
+                    
+                    btn_col1, btn_col2 = st.columns(2)
+                    with btn_col1:
+                        st.download_button(
+                            "🖨️ Télécharger le Reçu PDF", 
+                            data=pdf_bytes, 
+                            file_name=f"Recu_{selected_row.get('Appartement', '')}_{selected_row.get('Client_Nom', '')}.pdf", 
+                            mime="application/pdf", 
+                            type="primary",
+                            use_container_width=True
+                        )
+                    with btn_col2:
+                        st.download_button(
+                            "🚓 Fiche de Police PDF (Individuelle)", 
+                            data=police_bytes, 
+                            file_name=f"Fiche_Police_{selected_row.get('Client_Nom', '')}.pdf", 
+                            mime="application/pdf", 
+                            use_container_width=True
+                        )
+
+                    scan_path_val = str(selected_row.get("Piece_Scan_Path", "")).strip()
+                    if scan_path_val and os.path.exists(scan_path_val):
+                        st.markdown("##### 📸 Photo / Scan de la Pièce d'Identité :")
+                        st.image(scan_path_val, caption=f"Pièce d'identité ({selected_row.get('Piece_Type', 'Document')})", width=380)
+
                     
                     with st.expander("✏️ Modifier les informations de ce séjour", expanded=False):
                         with st.form(f"edit_form_{selected_id}"):
@@ -1668,6 +1884,104 @@ else:
                         else:
                             st.info("Aucune dépense enregistrée sur cette période.")
                         
+                    # --- DASHBOARD VISUEL (PLOTLY) ---
+                    st.markdown("---")
+                    st.subheader("📊 Dashboard Visuel & Analyse de Performance")
+
+                    chart_col1, chart_col2 = st.columns(2)
+                    
+                    # 1. Évolution du CA mois par mois
+                    with chart_col1:
+                        st.markdown("##### 📈 Évolution du CA mois par mois")
+                        if not df_s.empty:
+                            ca_mois_list = []
+                            for _, r in df_s.iterrows():
+                                m_val = str(r.get("Mois", "")).strip()
+                                m_total = float(r.get("Montant_Total", 0) or 0)
+                                p_stat = str(r.get("Paiement", "Non Payé")).strip().lower()
+                                est_p = "Payé" if p_stat in ["payé", "paye"] else "En Attente"
+                                if m_val:
+                                    ca_mois_list.append({
+                                        "Mois": m_val,
+                                        "Montant": m_total,
+                                        "Statut": est_p
+                                    })
+                            if ca_mois_list:
+                                df_ca_chart = pd.DataFrame(ca_mois_list)
+                                try:
+                                    df_ca_chart["Date_Order"] = df_ca_chart["Mois"].apply(lambda x: datetime.strptime(x, "%m-%Y") if len(str(x).split("-"))==2 else datetime.min)
+                                    df_ca_chart = df_ca_chart.sort_values(by="Date_Order")
+                                except Exception:
+                                    pass
+                                
+                                df_ca_grouped = df_ca_chart.groupby(["Mois", "Statut"], as_index=False)["Montant"].sum()
+                                fig_ca = px.bar(
+                                    df_ca_grouped,
+                                    x="Mois",
+                                    y="Montant",
+                                    color="Statut",
+                                    color_discrete_map={"Payé": "#2ecc71", "En Attente": "#e74c3c"},
+                                    labels={"Montant": "CA (F CFA)", "Mois": "Période (Mois)"},
+                                    barmode="stack"
+                                )
+                                fig_ca.update_layout(margin=dict(l=20, r=20, t=30, b=20), height=320, legend_title_text="Statut")
+                                st.plotly_chart(fig_ca, use_container_width=True)
+                            else:
+                                st.info("Aucune donnée de CA disponible pour le graphique.")
+                        else:
+                            st.info("Aucune donnée de séjour enregistrée.")
+
+                    # 2. Rentabilité par Appartement
+                    with chart_col2:
+                        st.markdown("##### 🏆 Rentabilité par Appartement (CA Total)")
+                        if not df_s.empty:
+                            df_app_perf = df_s.groupby("Appartement", as_index=False).agg(
+                                CA_Total=("Montant_Total", lambda x: pd.to_numeric(x, errors="coerce").fillna(0).sum()),
+                                Nombre_Sejours=("id", "count")
+                            )
+                            if not df_app_perf.empty:
+                                fig_app = px.bar(
+                                    df_app_perf,
+                                    x="Appartement",
+                                    y="CA_Total",
+                                    text="CA_Total",
+                                    color="Appartement",
+                                    color_discrete_sequence=px.colors.qualitative.Set2,
+                                    labels={"CA_Total": "CA Total (F CFA)", "Appartement": "Appartement"}
+                                )
+                                fig_app.update_traces(texttemplate='%{text:,.0f} F', textposition='outside')
+                                fig_app.update_layout(margin=dict(l=20, r=20, t=30, b=20), height=320, showlegend=False)
+                                st.plotly_chart(fig_app, use_container_width=True)
+                            else:
+                                st.info("Aucune donnée d'appartement disponible.")
+                        else:
+                            st.info("Aucun séjour enregistré.")
+
+                    # 3. Répartition des Modes de Paiement
+                    st.markdown("##### 💳 Répartition des Modes de Paiement")
+                    if not df_s.empty and "Mode_Paiement" in df_s.columns:
+                        df_pm = df_s.groupby("Mode_Paiement", as_index=False).agg(
+                            Montant=("Montant_Total", lambda x: pd.to_numeric(x, errors="coerce").fillna(0).sum()),
+                            Nombre=("id", "count")
+                        )
+                        df_pm = df_pm[df_pm["Montant"] > 0]
+                        if not df_pm.empty:
+                            fig_pm = px.pie(
+                                df_pm,
+                                values="Montant",
+                                names="Mode_Paiement",
+                                hole=0.4,
+                                color_discrete_sequence=px.colors.sequential.RdBu
+                            )
+                            fig_pm.update_traces(textinfo="percent+label+value", valueformat=",.0f")
+                            fig_pm.update_layout(margin=dict(l=20, r=20, t=20, b=20), height=340)
+                            st.plotly_chart(fig_pm, use_container_width=True)
+                        else:
+                            st.info("Aucun montant enregistré par mode de paiement.")
+                    else:
+                        st.info("Données sur les modes de paiement indisponibles.")
+
+                        
                     st.markdown("---")
                     pdf_bytes = imprimer_bilan(sel_m, ca, ca_paye, ca_attente, comm, dep, net, d_m, df_s_mois)
                     st.download_button(
@@ -1691,12 +2005,12 @@ else:
         
         with chat_container:
             if not messages:
-                st.info("La discussion meublée est vide. Envoyez le premier message !")
+                st.info("La discussion est vide. Envoyez le premier message !")
             
             for msg in messages:
                 is_admin = (msg["sender"] == "admin")
-                avatar_icon = "👨‍💼" if is_admin else ("🤖" if msg["sender"] == "System" else "👤")
-                sender_label = "Direction (Admin)" if is_admin else ("Système (Notification)" if msg["sender"] == "System" else "Employé(e)")
+                avatar_icon = "👨‍💼" if is_admin else "👤"
+                sender_label = "Direction (Admin)" if is_admin else "Employé(e)"
                 
                 with st.chat_message(sender_label, avatar=avatar_icon):
                     col_msg, col_del = st.columns([0.9, 0.1])
